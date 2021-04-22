@@ -135,6 +135,8 @@ cloud_cb (const sensor_msgs::PointCloud2ConstPtr& input_cloud, const darknet_ros
   // Get cloud width and height
   int width = input_cloud->width;
   int height = input_cloud->height;
+  //int width = cloud->width;
+  //int height = cloud->height;
     ROS_INFO("input_cloud width: %d, height: %d", width, height);
 
   // Number of objects detected
@@ -151,9 +153,9 @@ cloud_cb (const sensor_msgs::PointCloud2ConstPtr& input_cloud, const darknet_ros
     int ymin                = input_detection->bounding_boxes[i].ymin;
     int ymax                = input_detection->bounding_boxes[i].ymax;
     float probability = input_detection->bounding_boxes[i].probability;
-    if(probability<0.6)
-        return;
-    ROS_INFO("object_name: %s, xmin: %d, xmax: %d, ymin: %d, ymax: %d", object_name.c_str(), xmin, xmax, ymin, ymax );
+    ROS_INFO("object_name: %s, xmin: %d, xmax: %d, ymin: %d, ymax: %d, probability: %.2lf", object_name.c_str(), xmin, xmax, ymin, ymax, probability );
+    if(probability<0.75)
+        continue;
 
     // -------------------ROI extraction------------------------------
 

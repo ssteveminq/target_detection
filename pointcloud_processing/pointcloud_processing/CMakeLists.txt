@@ -24,6 +24,7 @@ find_package(catkin REQUIRED COMPONENTS
 
 ## System dependencies are found with CMake's conventions
 # find_package(Boost REQUIRED COMPONENTS system)
+find_package(PCL REQUIRED)
 
 
 ## Uncomment this if the package has a setup.py. This macro ensures
@@ -52,7 +53,7 @@ include_directories(
 add_executable(pcl_processing src/pcl_processing.cpp)
 add_executable(people_processing src/people_processing.cpp)
 
-target_link_libraries(pcl_processing ${catkin_LIBRARIES})
+target_link_libraries(pcl_processing ${catkin_LIBRARIES} ${PCL_LIBRARIES})
 target_link_libraries(people_processing ${catkin_LIBRARIES})
 
 
