@@ -34,3 +34,5 @@ If you have some problem, please follow instrunctios from https://github.com/mic
 Pleae follow instructions from https://github.com/leggedrobotics/darknet_ros
 
 For more information about YOLO, Darknet, available training data and training YOLO see the following link: [YOLO: Real-Time Object Detection](http://pjreddie.com/darknet/yolo/).
+
+To compile this package, you need to build [darknet_ros_msgs](https://github.com/leggedrobotics/darknet_ros/tree/master/darknet_ros_msgs)
