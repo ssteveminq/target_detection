@@ -14,4 +14,8 @@ If you want to use Azure Kinect as RGBD camera, you should install Kinect SDK.
 Please follow instrunctios from https://github.com/microsoft/Azure-Kinect-Sensor-SDK
 
 
-# 
+### YOLO
+
+Pleae follow instructions from https://github.com/leggedrobotics/darknet_ros
+
+For more information about YOLO, Darknet, available training data and training YOLO see the following link: [YOLO: Real-Time Object Detection](http://pjreddie.com/darknet/yolo/).
