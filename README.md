@@ -8,6 +8,8 @@ It is assumed that we have pre-trained Object detection system such as YOLO or O
 
 
 ## Dependencies
+
+### Azure Kinect SDK
 If you want to use Azure Kinect as RGBD camera, you should install Kinect SDK.
 Please follow instrunctios from https://github.com/microsoft/Azure-Kinect-Sensor-SDK
 
