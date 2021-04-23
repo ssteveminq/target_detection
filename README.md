@@ -23,7 +23,6 @@ sudo apt install -y libk4a1.3 libk4a1.3-dev k4a-tools
 #### clone Azure Kinect ROS drivers, compile packages in your workspace
 ```
 git clone https://github.com/microsoft/Azure_Kinect_ROS_Driver
-cd ..
 catkin build
 ```
 
