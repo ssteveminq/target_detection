@@ -12,8 +12,7 @@ It is assumed that we have pre-trained Object detection system such as YOLO or O
 ### Azure Kinect SDK
 If you want to use Azure Kinect as RGBD camera, you should install Kinect SDK.
 
-
-# install Azure Kinect SDK following https://github.com/microsoft/Azure-Kinect-Sensor-SDK/blob/develop/docs/usage.md
+#### Install Azure Kinect SDK following https://github.com/microsoft/Azure-Kinect-Sensor-SDK/blob/develop/docs/usage.md
 ```
 curl https://packages.microsoft.com/keys/microsoft.asc | sudo apt-key add -
 sudo apt-add-repository https://packages.microsoft.com/ubuntu/18.04/prod
@@ -21,16 +20,14 @@ sudo apt update
 sudo apt install -y libk4a1.3 libk4a1.3-dev k4a-tools
 ```
 
-# clone Azure Kinect ROS drivers, compile packages in your workspace
+#### clone Azure Kinect ROS drivers, compile packages in your workspace
 ```
 git clone https://github.com/microsoft/Azure_Kinect_ROS_Driver
 cd ..
 catkin build
 ```
 
-
 If you have some problem, please follow instrunctios from https://github.com/microsoft/Azure-Kinect-Sensor-SDK
-
 
 
 ### YOLO
