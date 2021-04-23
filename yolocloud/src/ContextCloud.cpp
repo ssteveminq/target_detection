@@ -50,6 +50,8 @@ int ContextCloud::addObject(const ImageBoundingBox &bbox,
         //throw std::runtime_error("Invalid bbox");
         return -1;
     }
+    if(bbox.label=="sofa")
+	    return -1;
 
     // define bounding rectangle
     Rect rect(bbox.x, bbox.y, bbox.width, bbox.height);
@@ -112,8 +114,10 @@ int ContextCloud::addObject(const ImageBoundingBox &bbox,
     }
     depth /= count;
 
+    ROS_INFO("after-grabcut-depth");
     //float commonest = std::most_common(depthvector.begin(), depthvector.end());
 
+    /*
     int co=0;
     int nmax=0;
     //fid the most common value in depth vector
@@ -132,6 +136,7 @@ int ContextCloud::addObject(const ImageBoundingBox &bbox,
     //ROS_INFO("avg : %.3lf, most_common: %.3lf ", depth, mostvalue);
     depth = mostvalue;
     }
+    */
 
 
     // No valid depth, so return
@@ -148,6 +153,7 @@ int ContextCloud::addObject(const ImageBoundingBox &bbox,
     float camera_y = (y_center - intrinsic_cy) * (1.0 / intrinsic_sy) * depth;
     float camera_z = depth;
     Eigen::Vector3f world = camToMap * Eigen::Vector3f(camera_x, camera_y, camera_z);
+    ROS_INFO("get 3d points");
 
     pcl::PointXYZL point;
     point.x = world(0);

@@ -32,11 +32,17 @@ struct ImageBoundingBox {
 
 class ContextCloud {
 private:
-    // Hardcoded intrinsic parameters for the HSR xtion
-    float intrinsic_sx = 535.2900990271;
-    float intrinsic_sy = 535.2900990271;
-    float intrinsic_cx = 320.0000000000;
-    float intrinsic_cy = 240.0000000000;
+    // Hardcoded intrinsic parameters for the Asus Xtion(HSR) 
+    //float intrinsic_sx = 535.2900990271;
+    //float intrinsic_sy = 535.2900990271;
+    //float intrinsic_cx = 320.0000000000;
+    //float intrinsic_cy = 240.0000000000;
+
+    // Hardcoded intrinsic parameters for the Azure Kinect xtion
+    float intrinsic_sx = 979.2900990271;
+    float intrinsic_sy = 979.2900990271;
+    float intrinsic_cx = 1021.0000000000;
+    float intrinsic_cy = 784.0000000000;
 
 public:
     pcl::PointCloud<pcl::PointXYZL>::Ptr objects;

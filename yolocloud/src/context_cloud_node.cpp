@@ -84,10 +84,10 @@ public:
 
         tf::StampedTransform transform;
         try {
-            listener.waitForTransform("map", "head_rgbd_sensor_link", rgb_image->header.stamp, ros::Duration(0.1));
-            listener.lookupTransform("map", "head_rgbd_sensor_link", rgb_image->header.stamp, transform);
-            //listener.waitForTransform("map", "rgb_camera_link", rgb_image->header.stamp, ros::Duration(0.1));
-            //listener.lookupTransform("map", "rgb_camera_link", rgb_image->header.stamp, transform);
+            //listener.waitForTransform("map", "head_rgbd_sensor_link", rgb_image->header.stamp, ros::Duration(0.1));
+            //listener.lookupTransform("map", "head_rgbd_sensor_link", rgb_image->header.stamp, transform);
+            listener.waitForTransform("map", "rgb_camera_link", rgb_image->header.stamp, ros::Duration(0.1));
+            listener.lookupTransform("map", "rgb_camera_link", rgb_image->header.stamp, transform);
         } catch (tf::TransformException &ex){
             ROS_ERROR("%s",ex.what());
             return;
@@ -134,7 +134,8 @@ public:
                 continue;
 
             ROS_INFO("add object for %s", bbox.label.c_str());
-            int idx = context_manager.addObject(bbox, cv_ptr->image, depthI, camToMap.cast<float>());
+	    if(bbox.label.c_str()!="sofa")
+		    int idx = context_manager.addObject(bbox, cv_ptr->image, depthI, camToMap.cast<float>());
         }
 
         
@@ -164,6 +165,7 @@ public:
         
 
         publishdata();
+        visualize();
 #ifdef VISUALIZE
         visualize();
 #endif
@@ -324,10 +326,10 @@ public:
                 auto idtime=context_manager.id_to_time.find(idset[i]);
                 auto object_point = indiv_id->second;
 
-                ros::Time cur_time = ros::Time::now();
-                auto time_duration = cur_time - idtime->second;
-                if(time_duration.toSec() > 15.0) 
-                    continue;
+                //ros::Time cur_time = ros::Time::now();
+                //auto time_duration = cur_time - idtime->second;
+                //if(time_duration.toSec() > 15.0) 
+                 //   continue;
 
                 //for (const auto &object : context_manager.objects->points) {
                 visualization_msgs::Marker marker;
@@ -344,14 +346,14 @@ public:
                 marker.pose.orientation.y = 0.;
                 marker.pose.orientation.z = 0.;
                 marker.pose.orientation.w = 1.;
-                marker.scale.x = 0.10;
-                marker.scale.y = 0.10;
-                marker.scale.z = 0.10;
+                marker.scale.x = 0.25;
+                marker.scale.y = 0.25;
+                marker.scale.z = 0.25;
                 marker.color.r = 1.;
                 marker.color.b = 0.;
                 marker.color.g = 0.;
                 marker.color.a = 1.;
-                marker.lifetime = ros::Duration(5.0);
+                marker.lifetime = ros::Duration(15.0);
 
                 visualization_msgs::Marker text_marker;
                 text_marker.header.frame_id = "map";
@@ -375,7 +377,7 @@ public:
                 text_marker.color.b = 0.;
                 text_marker.color.g = 0.;
                 text_marker.color.a = 1.;
-                text_marker.lifetime = ros::Duration(5.0);
+                text_marker.lifetime = ros::Duration(15.0);
 
                 yolo_marker_array.markers.push_back(marker);
                 yolo_marker_array.markers.push_back(text_marker);
@@ -408,16 +410,16 @@ int main (int argc, char **argv) {
 
     Context_Manager yc_node(n);
 
-    message_filters::Subscriber<sensor_msgs::Image> image_sub(n, "/hsrb/head_rgbd_sensor/rgb/image_raw", 10);
-    message_filters::Subscriber<sensor_msgs::Image> depth_sub(n, "/hsrb/head_rgbd_sensor/depth_registered/image", 10);
-    //message_filters::Subscriber<sensor_msgs::Image> image_sub(n, "/rgb/image_raw", 10);
-    //message_filters::Subscriber<sensor_msgs::Image> depth_sub(n, "/depth_to_rgb/image_raw", 10);
+    //message_filters::Subscriber<sensor_msgs::Image> image_sub(n, "/hsrb/head_rgbd_sensor/rgb/image_raw", 10);
+    //message_filters::Subscriber<sensor_msgs::Image> depth_sub(n, "/hsrb/head_rgbd_sensor/depth_registered/image", 10);
+    message_filters::Subscriber<sensor_msgs::Image> image_sub(n, "/rgb/image_raw", 10);
+    message_filters::Subscriber<sensor_msgs::Image> depth_sub(n, "/depth/image_raw", 10);
 
     //message_filters::Subscriber<sensor_msgs::Image> image_sub(n, "/camera/rgb/image_color", 10);
     //message_filters::Subscriber<sensor_msgs::Image> depth_sub(n, "/camera/depth/image", 10);
     //message_filters::Subscriber<tmc_yolo2_ros::Detections> yolo_sub(n, "/yolo2_node/detections", 10);
     message_filters::Subscriber<darknet_ros_msgs::BoundingBoxes> yolo_sub(n, "/darknet_ros/bounding_boxes", 10);
-    message_filters::Synchronizer<SyncPolicy> sync(SyncPolicy(10), image_sub, depth_sub, yolo_sub);
+    message_filters::Synchronizer<SyncPolicy> sync(SyncPolicy(50), image_sub, depth_sub, yolo_sub);
     sync.registerCallback(boost::bind(&Context_Manager::data_callback, &yc_node, _1, _2, _3));
 
 

@@ -109,7 +109,7 @@ cloud_cb (const sensor_msgs::PointCloud2ConstPtr& input_cloud, const darknet_ros
   // Initialize container for centroids' markers
   visualization_msgs::Marker centroid_bottle_list, centroid_cup_list ;
 
-  centroid_bottle_list.header.frame_id = centroid_cup_list.header.frame_id = fixed_frame;
+  centroid_bottle_list.header.frame_id = centroid_cup_list.header.frame_id = input_cloud->header.frame_id;
   centroid_bottle_list.type = centroid_cup_list.type = 7;
   centroid_bottle_list.color.a = centroid_cup_list.color.a = 1.0;
   centroid_bottle_list.color.r = centroid_cup_list.color.r = 1.0;
@@ -434,7 +434,7 @@ main (int argc, char** argv)
   // Synchronize darknet detection with pointcloud
   typedef sync_policies::ApproximateTime<sensor_msgs::PointCloud2, darknet_ros_msgs::BoundingBoxes> MySyncPolicy;
   // ApproximateTime takes a queue size as its constructor argument, hence MySyncPolicy(10)
-  Synchronizer<MySyncPolicy> sync(MySyncPolicy(20), sub_cloud, sub_box);
+  Synchronizer<MySyncPolicy> sync(MySyncPolicy(100), sub_cloud, sub_box);
   sync.registerCallback(boost::bind(&cloud_cb, _1, _2));
 
   // Create a ROS publisher for the output point cloud
