@@ -34,3 +34,13 @@ If you have some problem, please follow instrunctios from https://github.com/mic
 Pleae follow instructions from https://github.com/leggedrobotics/darknet_ros
 
 For more information about YOLO, Darknet, available training data and training YOLO see the following link: [YOLO: Real-Time Object Detection](http://pjreddie.com/darknet/yolo/).
+
+### Test
+
+1) launch rgbd camera node
+2) target_frame_id (e.g.,"map") should exist 
+```
+roslaunch azure_kinect_ros_driver driver.launch
+roslaunch darknet_ros yolov_3.launch
+rosrun pointcloud_processing pcl_processing
+```

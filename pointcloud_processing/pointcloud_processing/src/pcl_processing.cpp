@@ -6,6 +6,7 @@
 #include <geometry_msgs/PoseArray.h>
 #include <geometry_msgs/Vector3.h>
 #include <geometry_msgs/Vector3Stamped.h>
+#include <geometry_msgs/TransformStamped.h>
 #include <visualization_msgs/Marker.h>
 #include <pointcloud_processing_msgs/ObjectInfo.h>
 #include <pointcloud_processing_msgs/ObjectInfoArray.h>
@@ -13,6 +14,7 @@
 #include <tf/transform_listener.h>
 #include <tf2_geometry_msgs/tf2_geometry_msgs.h>
 #include <tf2_ros/transform_listener.h>
+#include <tf2_ros/static_transform_broadcaster.h>
 #include <math.h> 
 
 // Approximate time policy
@@ -40,7 +42,11 @@ using namespace message_filters;
 #include <pcl/common/centroid.h>
 
 const int QUEUE_SIZE = 10;
-
+std::string DARKNET_TOPIC;
+std::string PCL_TOPIC;
+std::string TARGET_FRAME;
+bool VISUAL;
+bool PCL_VISUAL;
 
 // Initialize publishers
 ros::Publisher pub_bottle;
@@ -54,12 +60,16 @@ ros::Publisher pub_cup_poses;
 ros::Publisher pub_bottle_list;
 ros::Publisher pub_ObjectInfos;
 
+
+
 // Initialize transform listener
 tf::TransformListener* lst;
 tf2_ros::Buffer* pbuffer;
+tf2_ros::StaticTransformBroadcaster* broad_caster;
+  //static tf2_ros::StaticTransformBroadcaster static_broadcaster;
 
 // Set fixed reference frame
-std::string fixed_frame = "map";
+//std::string fixed_frame = "map";
 
 //map
 std::map<std::string, pointcloud_processing_msgs::ObjectInfo> labels_to_obj;
@@ -89,7 +99,7 @@ void
 cloud_cb (const sensor_msgs::PointCloud2ConstPtr& input_cloud, const darknet_ros_msgs::BoundingBoxesConstPtr& input_detection)
 {
 
-  ROS_INFO("cloud callback");
+  //ROS_INFO("cloud callback");
   tf2_ros::Buffer tf_buffer;
   tf2_ros::TransformListener tf2_listener(tf_buffer);
   received_first_message = true;
@@ -104,7 +114,7 @@ cloud_cb (const sensor_msgs::PointCloud2ConstPtr& input_cloud, const darknet_ros
   // Initialize container for object poses
   geometry_msgs::PoseArray bottle_poses,cup_poses;
   bottle_poses.header.stamp = cup_poses.header.stamp = ros::Time::now();
-  bottle_poses.header.frame_id = cup_poses.header.frame_id = fixed_frame;
+  bottle_poses.header.frame_id = cup_poses.header.frame_id = input_cloud->header.frame_id;
 
   // Initialize container for centroids' markers
   visualization_msgs::Marker centroid_bottle_list, centroid_cup_list ;
@@ -133,11 +143,18 @@ cloud_cb (const sensor_msgs::PointCloud2ConstPtr& input_cloud, const darknet_ros
   pcl::fromROSMsg( *input_cloud, *cloud);
 
   // Get cloud width and height
-  int width = input_cloud->width;
-  int height = input_cloud->height;
-  //int width = cloud->width;
-  //int height = cloud->height;
-    ROS_INFO("input_cloud width: %d, height: %d", width, height);
+  //int width = input_cloud->width;
+  //int height = input_cloud->height;
+  int width = cloud->width;
+  int height = cloud->height;
+  if(width==1 ||height==1)
+  {
+      width = 2048;
+      height = 1536;
+  
+  }
+  ROS_INFO("input_cloud width: %d, height: %d", width, height);
+  
 
   // Number of objects detected
   int num_boxes = input_detection->bounding_boxes.size();
@@ -153,12 +170,13 @@ cloud_cb (const sensor_msgs::PointCloud2ConstPtr& input_cloud, const darknet_ros
     int ymin                = input_detection->bounding_boxes[i].ymin;
     int ymax                = input_detection->bounding_boxes[i].ymax;
     float probability = input_detection->bounding_boxes[i].probability;
-    ROS_INFO("object_name: %s, xmin: %d, xmax: %d, ymin: %d, ymax: %d, probability: %.2lf", object_name.c_str(), xmin, xmax, ymin, ymax, probability );
+    //ROS_INFO("object_name: %s, xmin: %d, xmax: %d, ymin: %d, ymax: %d, probability: %.2lf", object_name.c_str(), xmin, xmax, ymin, ymax, probability );
     if(probability<0.75)
         continue;
+    else
+        ROS_INFO("object_name: %s, xmin: %d, xmax: %d, ymin: %d, ymax: %d, probability: %.2lf", object_name.c_str(), xmin, xmax, ymin, ymax, probability );
 
     // -------------------ROI extraction------------------------------
-
     // Initialize container for inliers of the ROI
     pcl::PointIndices::Ptr inliers_roi (new pcl::PointIndices());
 
@@ -167,24 +185,23 @@ cloud_cb (const sensor_msgs::PointCloud2ConstPtr& input_cloud, const darknet_ros
     for (int column(xmin); column<=xmax; column++){
       for (int row(ymin); row<=ymax; row++){
         // Pixel coordinates to pointcloud index
-        indices.push_back(row*width+column);
+        //int idx = row*width+column;
+        int idx = row*width+column;
+        //ROS_INFO("idx pcl: %d",idx );
+        if(idx < width*height)
+            indices.push_back(row*width+column);
       }
     }
 
     inliers_roi->indices = indices;
-
     // Create the filtering ROI object
     pcl::ExtractIndices<pcl::PointXYZRGB> extract_roi;
     // Extract the inliers  of the ROI
     extract_roi.setInputCloud (cloud);
     extract_roi.setIndices (inliers_roi);
     extract_roi.setNegative (false);
-    ROS_INFO("here-1.1");
     extract_roi.filter (*cloud_filtered_roi);
-    //extract_roi.filter (*cloud);
-    ROS_INFO("here-1.2");
     
-    //ROS_INFO("here-1.2");
     // ----------------------VoxelGrid----------------------------------
     // Perform the downsampling
     pcl::VoxelGrid<pcl::PointXYZRGB> sor_voxelgrid;
@@ -203,11 +220,38 @@ cloud_cb (const sensor_msgs::PointCloud2ConstPtr& input_cloud, const darknet_ros
    sor_noise.setStddevMulThresh (1.0);
    sor_noise.filter (*cloud_filtered_sor);
 
+
+
+   /*
+  pcl::ModelCoefficients::Ptr coefficients (new pcl::ModelCoefficients ());
+  pcl::PointIndices::Ptr inliers_plane (new pcl::PointIndices ());
+  pcl::SACSegmentation<pcl::PointXYZRGB> seg;
+  seg.setOptimizeCoefficients (true);
+  seg.setModelType (pcl::SACMODEL_PLANE);
+  seg.setMethodType (pcl::SAC_RANSAC);
+  seg.setDistanceThreshold (0.05);
+  seg.setInputCloud (cloud_filtered_sor);
+  seg.segment (*inliers_plane, *coefficients);
+  // Create the filtering object
+  pcl::ExtractIndices<pcl::PointXYZRGB> extract_plane;
+
+  // Extract the inliers
+  extract_plane.setInputCloud (cloud_filtered_sor);
+  extract_plane.setIndices (inliers_plane);
+  extract_plane.setNegative (false);
+  extract_plane.filter (*cloud_filtered_inplane);
+    
+  // Extract the outliers
+  //extract_plane.setNegative (true);
+  //extract_plane.filter (*cloud_filtered_outplane);
+  */
+
    pcl::IndicesPtr indices_xyz(new std::vector <int>);
    pcl::PassThrough<pcl::PointXYZRGB> pass;
    pass.setInputCloud(cloud_filtered_sor);
+   //pass.setInputCloud(cloud_filtered_inplane);
    pass.setFilterFieldName("z");
-   pass.setFilterLimits(0.0,3.0);
+   pass.setFilterLimits(0.0,2.5);
    pass.filter(*indices_xyz);
 
    pcl::ExtractIndices<pcl::PointXYZRGB> extract_roi2;
@@ -217,85 +261,72 @@ cloud_cb (const sensor_msgs::PointCloud2ConstPtr& input_cloud, const darknet_ros
     extract_roi2.setNegative (false);
     extract_roi2.filter (*cloud_filtered_sor);
   
-
-  ROS_INFO("here-2");
    //remove NaN points from the cloud
    pcl::PointCloud<pcl::PointXYZRGB>::Ptr nanfiltered_cloud (new pcl::PointCloud<pcl::PointXYZRGB>);
    std::vector<int> rindices;
+   //pcl::removeNaNFromPointCloud(*cloud_filtered_sor,*nanfiltered_cloud, rindices);
    pcl::removeNaNFromPointCloud(*cloud_filtered_sor,*nanfiltered_cloud, rindices);
 
-   float avg_depth =0;
-   float nearest=0.0;
-   float depth_maxcount=0.0;
-   int depth_count =nanfiltered_cloud->points.size();
-   //depthvector.resize(depth_count);
-   for(size_t i=0;i<nanfiltered_cloud->points.size();i++)
+   /*
+
+   pcl::octree::OctreePointCloudSearch<pcl::PointXYZRGB> octree(0.2f);
+   octree.setInputCloud(cloud_filtered_sor);
+   octree.addPointsFromInputCloud();
+
+   pcl::PointXYZ closest;
+   closest.x = 0;
+   closest.y = 0;
+   closest.z = 0;
+
+   std::vector<int> pointIdxNKNSearch;
+   std::vector<float> pointNKNSquaredDistance;
+
+   if (octree.nearestKSearch(closest, 1, pointIdxNKNSearch, pointNKNSquaredDistance) <= 0)
    {
-       //std::cout<<"inside clouds"<<nanfiltered_cloud->points[i].z<<std::endl;
-       float cur_depth = nanfiltered_cloud->points[i].z;
-       avg_depth+=nanfiltered_cloud->points[i].z;
-       nearest =roundf(cur_depth*1000) /1000.0;
+       std::cout << "No point detected" << std::endl;
+       return;
    }
 
-   //If depth value is not reliable, don't use this value to update target object information
-   if(depth_count>0)
-       avg_depth =avg_depth/depth_count;
-   else
-       continue;
-    
-   if(Is_target(object_name) && !std::isnan(avg_depth) )
-   {
-       auto it_depthvector = depth_buffer.find(object_name);
-       if(it_depthvector !=depth_buffer.end() )
-           if(it_depthvector->second.size()>QUEUE_SIZE)
-           {
-               it_depthvector->second.push_back(avg_depth);
-               it_depthvector->second.pop_front();
-           }
-           else
-               it_depthvector->second.push_back(avg_depth);
-   }
-
-   if(Is_target(object_name) && avg_depth ==0.0)
-   {
-       auto it_depthvector = depth_buffer.find(object_name);
-        if(it_depthvector !=depth_buffer.end() )
+   // Generate voxel for creating object detection
+   //
+    pcl::PointCloud<pcl::PointXYZ>::Ptr obstacle_cloud(new pcl::PointCloud<pcl::PointXYZ>);
+    std::vector<int> pointIdxVec;
+   
+    if (octree.voxelSearch(cloud_filtered_sor->points[pointIdxNKNSearch[0]], pointIdxVec) > 0)
+    {
+        for (std::size_t i = 0; i < pointIdxVec.size(); ++i)
         {
-           if(it_depthvector->second.size()>0)
-           {
-               float avg_buffer=0.0;
-               int   avg_count=0;
-               avg_depth =0.0;
-               for(size_t j(0);j<it_depthvector->second.size();j++)
-               {
-                   if(std::isnan(it_depthvector->second[j]) && (it_depthvector->second[j]!=0.0))
-                   {
-                       avg_buffer+=it_depthvector->second[j];
-                       avg_count++;
-                   }
-               }
-               if(avg_count>0)
-                   avg_buffer = avg_buffer/avg_count;
-
-               avg_depth= avg_buffer ;
-               //avg_depth =(it_depthvector->second[it_depthvector->second.size()-10]);
-               ROS_INFO("%s depath is nan, so, put into deque value: %.3f",object_name.c_str(), avg_buffer);
-
-           }
-            else
-            {
-               avg_depth = 0.0;
-               ROS_INFO("%s depath is nan, so, put into Zero----last casee: %.3f",object_name.c_str(), avg_depth);
-            }
+            obstacle_cloud->points.push_back(cloud_filtered_sor->points[pointIdxVec[i]]);
         }
-   }
+    }
+   
+    if (obstacle_cloud->points.size() == 0)
+    {
+        std::cout << "The closest point has not been recorded to any obstacle voxel point" <<
+            std::endl;
+        return;
+    }
+
+    
+    for(int j(0);j<obstacle_cloud->points.size(); j++)
+    {
+        ROS_INFO("x: %.2lf, y: %.2lf, z: %.2lf ", obstacle_cloud->points[j].x,
+                obstacle_cloud->points[j].y, obstacle_cloud->points[j].z);
+    
+    }
+
+
+    */
+   
+
+
   // ----------------------Compute centroid-----------------------------
   Eigen::Vector4f centroid_out;
   pcl::compute3DCentroid(*cloud_filtered_sor,centroid_out); 
 
   geometry_msgs::PointStamped centroid_rel;
   geometry_msgs::PointStamped centroid_abs;
-  centroid_abs.header.frame_id=fixed_frame;
+  centroid_abs.header.frame_id=TARGET_FRAME;
   centroid_rel.header.frame_id = input_cloud->header.frame_id;
   //ROS_INFO("cloud frame id: %s", input_cloud->header.frame_id.c_str());
   centroid_abs.header.stamp = ros::Time(0);
@@ -304,11 +335,11 @@ cloud_cb (const sensor_msgs::PointCloud2ConstPtr& input_cloud, const darknet_ros
   centroid_rel.point.x = centroid_out[0];
   centroid_rel.point.y = centroid_out[1];
   centroid_rel.point.z = centroid_out[2];
+  //ROS_INFO(")
 
   
-  lst->waitForTransform(input_cloud->header.frame_id, fixed_frame, ros::Time(0), ros::Duration(2.0));
-  try{lst->transformPoint(fixed_frame,centroid_rel, centroid_abs);}
-  //ROS_INFO("succedd");}
+  lst->waitForTransform(input_cloud->header.frame_id, TARGET_FRAME, ros::Time(0), ros::Duration(2.0));
+  try{lst->transformPoint(TARGET_FRAME,centroid_rel, centroid_abs);}
   catch (tf::TransformException& ex) {
       ROS_INFO("transform error #1") ;
   }
@@ -322,6 +353,25 @@ cloud_cb (const sensor_msgs::PointCloud2ConstPtr& input_cloud, const darknet_ros
   object_pose.pose.position.y = centroid_rel.point.y;
   object_pose.pose.position.z = centroid_rel.point.z;
 
+  geometry_msgs::TransformStamped object_transform;
+  object_transform.header.stamp= input_cloud->header.stamp;
+  object_transform.header.frame_id = TARGET_FRAME;
+  object_transform.child_frame_id = "target_frame";
+  object_transform.transform.translation.x = centroid_abs.point.x;
+  object_transform.transform.translation.y = centroid_abs.point.y;
+  object_transform.transform.translation.z = centroid_abs.point.z;
+  object_transform.transform.rotation.x = 0.0;
+  object_transform.transform.rotation.y = 0.0;
+  object_transform.transform.rotation.z = 0.0;
+  object_transform.transform.rotation.w = 1.0;
+  broad_caster->sendTransform(object_transform);
+  //object_transform.pose.position.x = centroid_abs.point.x;
+  //object_transform.pose.position.y = centroid_abs.point.y;
+  //object_transform.pose.position.z = centroid_abs.point.z;
+
+
+
+
   pointcloud_processing_msgs::ObjectInfo cur_obj;
   cur_obj.x = xmin;
   cur_obj.y = ymin;
@@ -329,7 +379,8 @@ cloud_cb (const sensor_msgs::PointCloud2ConstPtr& input_cloud, const darknet_ros
   cur_obj.height = ymax-ymin;
   cur_obj.label = object_name;
   cur_obj.last_time = ros::Time::now();
-  cur_obj.average_depth=avg_depth;
+  //cur_obj.average_depth=avg_depth;
+  cur_obj.average_depth=0;
   cur_obj.no_observation=false;
   cur_obj.center = centroid_abs.point;
   cur_obj.depth_change = false;
@@ -341,15 +392,12 @@ cloud_cb (const sensor_msgs::PointCloud2ConstPtr& input_cloud, const darknet_ros
       
   // ---------------Store resultant cloud and centroid------------------
   if (object_name == "bottle"){
-     //pub_bottle_point.publish(centroid_rel);
     *cloud_bottle += *cloud_filtered_sor;
     centroid_bottle_list.points.push_back(centroid_rel.point);
     bottle_poses.poses.push_back(object_pose.pose);
     is_bottle = true;
   }
   else if (object_name == "cup"){
-     //pub_cup_point.publish(centroid_rel);
-      //pub_cup_point.publish(centroid_rel);
     *cloud_cup += *cloud_filtered_sor;
     centroid_cup_list.points.push_back(centroid_rel.point);
     cup_poses.poses.push_back(object_pose.pose);
@@ -377,21 +425,27 @@ cloud_cb (const sensor_msgs::PointCloud2ConstPtr& input_cloud, const darknet_ros
 
   //publish data
   pub_ObjectInfos.publish(objectsarray);
+
+  ///// pcl publisher ////
   // Create a container for the result data.
-  //sensor_msgs::PointCloud2 output_bottle;
-  //sensor_msgs::PointCloud2 output_cup;
+  if(PCL_VISUAL)
+  {
+      sensor_msgs::PointCloud2 output_bottle;
+      //sensor_msgs::PointCloud2 output_cup;
 
-  // Convert pcl::PointCloud to sensor_msgs::PointCloud2
-  //pcl::toROSMsg(*cloud_bottle,output_bottle);
-  //pcl::toROSMsg(*cloud_cup,output_cup);
+      //Convert pcl::PointCloud to sensor_msgs::PointCloud2
+      pcl::toROSMsg(*cloud_bottle,output_bottle);
+      //pcl::toROSMsg(*cloud_cup,output_cup);
 
-  // Set output frame as the input frame
-  //output_bottle.header.frame_id           = input_cloud->header.frame_id;
-  //output_cup.header.frame_id      = input_cloud->header.frame_id;
+      //Set output frame as the input frame
+      output_bottle.header.frame_id   = input_cloud->header.frame_id;
+      //output_cup.header.frame_id      = input_cloud->header.frame_id;
 
-  // Publish the data.
-  //pub_bottle.publish (output_bottle);
-  //pub_cup.publish (output_cup);
+      // Publish the data.
+      pub_bottle.publish (output_bottle);
+      //pub_cup.publish (output_cup);
+  }
+  ///// pcl publisher /////
 
   // Publish markers
   pub_bottle_centroid.publish (centroid_bottle_list);
@@ -413,6 +467,12 @@ main (int argc, char** argv)
   ros::init (argc, argv, "pointcloud_processing");
   ros::NodeHandle nh;
 
+  nh.param("DARKNET_TOPIC", DARKNET_TOPIC, {"/darknet_ros/bounding_boxes"});
+  nh.param("PCL_TOPIC", PCL_TOPIC, {"/points2"});
+  nh.param("TARGET_FRAME", TARGET_FRAME, {"map"});
+  nh.param("VISUAL", VISUAL, {true});
+  nh.param("PCL_VISUAL", PCL_VISUAL, {true});
+
   target_string.push_back("bottle");
   target_string.push_back("cup");
 
@@ -422,14 +482,19 @@ main (int argc, char** argv)
 
   // Initialize subscribers to darknet detection and pointcloud
   //message_filters::Subscriber<sensor_msgs::PointCloud2> sub_cloud(nh, "/hsrb/head_rgbd_sensor/depth_registered/rectified_points", 1);
-  message_filters::Subscriber<darknet_ros_msgs::BoundingBoxes> sub_box(nh, "/darknet_ros/bounding_boxes", 1);
-  message_filters::Subscriber<sensor_msgs::PointCloud2> sub_cloud(nh, "/points2", 1);
+  //message_filters::Subscriber<darknet_ros_msgs::BoundingBoxes> sub_box(nh, "/darknet_ros/bounding_boxes", 1);
+  //message_filters::Subscriber<sensor_msgs::PointCloud2> sub_cloud(nh, "/points2", 1);
+  message_filters::Subscriber<darknet_ros_msgs::BoundingBoxes> sub_box(nh, DARKNET_TOPIC, 1);
+  message_filters::Subscriber<sensor_msgs::PointCloud2> sub_cloud(nh, PCL_TOPIC, 1);
 
   // Initialize transform listener
   tf::TransformListener listener(ros::Duration(10));
   lst = &listener;
   tf2_ros::Buffer tf_buffer(ros::Duration(50));
   pbuffer = &tf_buffer;
+
+  static tf2_ros::StaticTransformBroadcaster static_broadcaster;
+  broad_caster = &static_broadcaster;
 
   // Synchronize darknet detection with pointcloud
   typedef sync_policies::ApproximateTime<sensor_msgs::PointCloud2, darknet_ros_msgs::BoundingBoxes> MySyncPolicy;
