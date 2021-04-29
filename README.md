@@ -44,3 +44,4 @@ roslaunch azure_kinect_ros_driver driver.launch
 roslaunch darknet_ros yolov_3.launch
 rosrun pointcloud_processing pcl_processing
 ```
+To compile this package, you need to build [darknet_ros_msgs](https://github.com/leggedrobotics/darknet_ros/tree/master/darknet_ros_msgs)
