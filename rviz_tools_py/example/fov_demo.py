@@ -32,7 +32,7 @@
 """
 This is a demo of Rviz Tools for python which tests all of the
 available functions by publishing lots of Markers in Rviz.
-modified by Minkyu Kim 20190129
+modified by Minkyu Kim 20210511
 """
 
 # Python includes
@@ -59,8 +59,11 @@ from rviz_tools_py.geometry_tools import LinePlaneInterSection
 from rviz_tools_py.geometry_tools import tangent_point_circle_extpoint 
 from rviz_tools_py.geometry_tools import projection_point_to_plane 
 
-WIDTH_RES = 512
-HEIGHT_RES = 512
+# WIDTH_RES = 512
+# HEIGHT_RES = 512
+
+WIDTH_RES = 1920
+HEIGHT_RES = 1080
 
 
 _MAP_TF='odom'
@@ -77,7 +80,7 @@ class DrawManager(object):
             samples_markers = rviz_tools.RvizMarkers(_SESNSOR_TF, 'sample_marker')
             rospy.Subscriber("point_3d", PointStamped,self.point_callback)
             rospy.Subscriber("imagepoint", PointStamped,self.imagepoint_callback)
-            darknet_topic = "/retina_ros/bounding_boxes"
+            darknet_topic = "/darknet_ros/bounding_boxes"
             rospy.Subscriber(darknet_topic, BoundingBoxes, self.yolo_callback)
             objinfo_topic = "/ObjectInfos"
             rospy.Subscriber(objinfo_topic, ObjectInfoArray, self.object_callback)

@@ -337,6 +337,7 @@ pcloud_cb (const sensor_msgs::PointCloud2ConstPtr& input_cloud)
       cur_obj.is_target=false;
       
   // ---------------Store resultant cloud and centroid------------------
+  ROS_INFO("object_name: %s", object_name.c_str());
   if (object_name == TARGET_CLASS){
      //pub_target_point.publish(centroid_rel);
      ROS_INFO("%s", TARGET_CLASS.c_str());
@@ -393,8 +394,6 @@ pcloud_cb (const sensor_msgs::PointCloud2ConstPtr& input_cloud)
 
 
 
-
-
 int
 main (int argc, char** argv)
 {
@@ -408,7 +407,7 @@ main (int argc, char** argv)
   nh.param("FOV_TOPIC", FOV_TOPIC, {"/fov_regions"});
   //nh.param("PCL_TOPIC", PCL_TOPIC, {"/points2"});
   nh.param("TARGET_FRAME", TARGET_FRAME, {"odom"});
-  nh.param("TARGET_CLASS", TARGET_CLASS, {"bottle"});
+  nh.param("TARGET_CLASS", TARGET_CLASS, {"chair"});
   nh.param("VISUAL", VISUAL, {true});
   nh.param("PCL_VISUAL", PCL_VISUAL, {true});
 
@@ -438,13 +437,11 @@ main (int argc, char** argv)
   pub_target_centroid = nh.advertise<visualization_msgs::Marker> ("target_centroids", 1);
 
   //Create a ROS publisher for the detected  points
-  pub_target_point= nh.advertise<geometry_msgs::PointStamped> ("/bottle_center", 1);
+  pub_target_point= nh.advertise<geometry_msgs::PointStamped> ("/target_center", 1);
 
   // Create a ROS publisher for the detected poses
   pub_target_poses = nh.advertise<geometry_msgs::PoseArray> ("/target_poses", 1);
 
-  // Create a ROS publisher for bottle position
-  //pub_target_list = nh.advertise<pointcloud_processing_msgs::handle_position> ("detected_bottle", 1);
   pub_ObjectInfos = nh.advertise<pointcloud_processing_msgs::ObjectInfoArray> ("ObjectInfos", 1);
 
   ROS_INFO("Started. Waiting for inputs.");
