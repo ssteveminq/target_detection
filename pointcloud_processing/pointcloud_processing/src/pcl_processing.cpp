@@ -59,7 +59,7 @@ tf::TransformListener* lst;
 tf2_ros::Buffer* pbuffer;
 
 // Set fixed reference frame
-std::string fixed_frame = "map";
+std::string fixed_frame = "odom";
 
 //map
 std::map<std::string, pointcloud_processing_msgs::ObjectInfo> labels_to_obj;
@@ -89,7 +89,7 @@ void
 cloud_cb (const sensor_msgs::PointCloud2ConstPtr& input_cloud, const darknet_ros_msgs::BoundingBoxesConstPtr& input_detection)
 {
 
-  ROS_INFO("cloud callback");
+  //ROS_INFO("cloud callback");
   tf2_ros::Buffer tf_buffer;
   tf2_ros::TransformListener tf2_listener(tf_buffer);
   received_first_message = true;
@@ -136,6 +136,7 @@ cloud_cb (const sensor_msgs::PointCloud2ConstPtr& input_cloud, const darknet_ros
   int width = input_cloud->width;
   int height = input_cloud->height;
     ROS_INFO("input_cloud width: %d, height: %d", width, height);
+    int pcl_size = width*height;
 
   // Number of objects detected
   int num_boxes = input_detection->bounding_boxes.size();
@@ -154,6 +155,7 @@ cloud_cb (const sensor_msgs::PointCloud2ConstPtr& input_cloud, const darknet_ros
     if(probability<0.6)
         return;
     ROS_INFO("object_name: %s, xmin: %d, xmax: %d, ymin: %d, ymax: %d", object_name.c_str(), xmin, xmax, ymin, ymax );
+    object_name="bottle";
 
     // -------------------ROI extraction------------------------------
 
@@ -165,9 +167,14 @@ cloud_cb (const sensor_msgs::PointCloud2ConstPtr& input_cloud, const darknet_ros
     for (int column(xmin); column<=xmax; column++){
       for (int row(ymin); row<=ymax; row++){
         // Pixel coordinates to pointcloud index
-        indices.push_back(row*width+column);
+        //int idxx= row*width+column;
+        int idxx= row*width+column;
+        std::cout<<"idxx"<<idxx<<std::endl;
+        if(pcl_size>idxx)
+            indices.push_back(idxx);
       }
     }
+    ROS_INFO("indices.size() = %d", indices.size());
 
     inliers_roi->indices = indices;
 
@@ -177,18 +184,19 @@ cloud_cb (const sensor_msgs::PointCloud2ConstPtr& input_cloud, const darknet_ros
     extract_roi.setInputCloud (cloud);
     extract_roi.setIndices (inliers_roi);
     extract_roi.setNegative (false);
-    ROS_INFO("here-1.1");
     extract_roi.filter (*cloud_filtered_roi);
+    ROS_INFO("here-1.1");
     //extract_roi.filter (*cloud);
-    ROS_INFO("here-1.2");
+    //ROS_INFO("here-1.2");
     
     //ROS_INFO("here-1.2");
     // ----------------------VoxelGrid----------------------------------
     // Perform the downsampling
     pcl::VoxelGrid<pcl::PointXYZRGB> sor_voxelgrid;
     sor_voxelgrid.setInputCloud (cloud_filtered_roi);
-    sor_voxelgrid.setLeafSize (0.01, 0.01, 0.01); //size of the grid
+    sor_voxelgrid.setLeafSize (0.05, 0.05, 0.05); //size of the grid
     sor_voxelgrid.filter (*cloud_filtered_voxelgrid);
+    ROS_INFO("here-1.2");
 
 
    // ---------------------StatisticalOutlierRemoval--------------------
@@ -208,15 +216,15 @@ cloud_cb (const sensor_msgs::PointCloud2ConstPtr& input_cloud, const darknet_ros
    pass.setFilterLimits(0.0,3.0);
    pass.filter(*indices_xyz);
 
-   pcl::ExtractIndices<pcl::PointXYZRGB> extract_roi2;
+   //pcl::ExtractIndices<pcl::PointXYZRGB> extract_roi2;
     // Extract the inliers  of the ROI
-    extract_roi2.setInputCloud (cloud_filtered_sor);
-    extract_roi2.setIndices (indices_xyz);
-    extract_roi2.setNegative (false);
-    extract_roi2.filter (*cloud_filtered_sor);
+    //extract_roi2.setInputCloud (cloud_filtered_sor);
+    //extract_roi2.setIndices (indices_xyz);
+    //extract_roi2.setNegative (false);
+    //extract_roi2.filter (*cloud_filtered_sor);
   
 
-  ROS_INFO("here-2");
+  //ROS_INFO("here-2");
    //remove NaN points from the cloud
    pcl::PointCloud<pcl::PointXYZRGB>::Ptr nanfiltered_cloud (new pcl::PointCloud<pcl::PointXYZRGB>);
    std::vector<int> rindices;
@@ -302,6 +310,7 @@ cloud_cb (const sensor_msgs::PointCloud2ConstPtr& input_cloud, const darknet_ros
   centroid_rel.point.x = centroid_out[0];
   centroid_rel.point.y = centroid_out[1];
   centroid_rel.point.z = centroid_out[2];
+  ROS_INFO("rel-x: %.2lf, y: %.2lf, z: %.2lf",centroid_out[0], centroid_out[1],centroid_out[2]);
 
   
   lst->waitForTransform(input_cloud->header.frame_id, fixed_frame, ros::Time(0), ros::Duration(2.0));
@@ -340,6 +349,7 @@ cloud_cb (const sensor_msgs::PointCloud2ConstPtr& input_cloud, const darknet_ros
   // ---------------Store resultant cloud and centroid------------------
   if (object_name == "bottle"){
      //pub_bottle_point.publish(centroid_rel);
+     ROS_INFO("bottle");
     *cloud_bottle += *cloud_filtered_sor;
     centroid_bottle_list.points.push_back(centroid_rel.point);
     bottle_poses.poses.push_back(object_pose.pose);
@@ -420,19 +430,21 @@ main (int argc, char** argv)
 
   // Initialize subscribers to darknet detection and pointcloud
   //message_filters::Subscriber<sensor_msgs::PointCloud2> sub_cloud(nh, "/hsrb/head_rgbd_sensor/depth_registered/rectified_points", 1);
-  message_filters::Subscriber<darknet_ros_msgs::BoundingBoxes> sub_box(nh, "/darknet_ros/bounding_boxes", 1);
-  message_filters::Subscriber<sensor_msgs::PointCloud2> sub_cloud(nh, "/points2", 1);
+  //message_filters::Subscriber<darknet_ros_msgs::BoundingBoxes> sub_box(nh, "/darknet_ros/bounding_boxes", 1);
+  message_filters::Subscriber<darknet_ros_msgs::BoundingBoxes> sub_box(nh, "/retina_ros/bounding_boxes", 1);
+  //message_filters::Subscriber<sensor_msgs::PointCloud2> sub_cloud(nh, "/lidar_points", 1);
+  message_filters::Subscriber<sensor_msgs::PointCloud2> sub_cloud(nh, "/pointcloud_transformer/output_pcl2", 1);
 
   // Initialize transform listener
   tf::TransformListener listener(ros::Duration(10));
   lst = &listener;
-  tf2_ros::Buffer tf_buffer(ros::Duration(50));
+  tf2_ros::Buffer tf_buffer(ros::Duration(100));
   pbuffer = &tf_buffer;
 
   // Synchronize darknet detection with pointcloud
   typedef sync_policies::ApproximateTime<sensor_msgs::PointCloud2, darknet_ros_msgs::BoundingBoxes> MySyncPolicy;
   // ApproximateTime takes a queue size as its constructor argument, hence MySyncPolicy(10)
-  Synchronizer<MySyncPolicy> sync(MySyncPolicy(20), sub_cloud, sub_box);
+  Synchronizer<MySyncPolicy> sync(MySyncPolicy(150), sub_cloud, sub_box);
   sync.registerCallback(boost::bind(&cloud_cb, _1, _2));
 
   // Create a ROS publisher for the output point cloud

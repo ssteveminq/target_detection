@@ -50,9 +50,11 @@ include_directories(
 )
 
 add_executable(pcl_processing src/pcl_processing.cpp)
+add_executable(sep_processing src/sep_processing.cpp)
 add_executable(people_processing src/people_processing.cpp)
 
 target_link_libraries(pcl_processing ${catkin_LIBRARIES})
+target_link_libraries(sep_processing ${catkin_LIBRARIES})
 target_link_libraries(people_processing ${catkin_LIBRARIES})
 
 
