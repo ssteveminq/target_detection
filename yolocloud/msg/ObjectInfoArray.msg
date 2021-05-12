@@ -1,0 +1,1 @@
+ObjectInfo[] objectinfos

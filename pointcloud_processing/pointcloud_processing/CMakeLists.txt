@@ -24,6 +24,7 @@ find_package(catkin REQUIRED COMPONENTS
 
 ## System dependencies are found with CMake's conventions
 # find_package(Boost REQUIRED COMPONENTS system)
+#find_package(PCL REQUIRED)
 
 
 ## Uncomment this if the package has a setup.py. This macro ensures
@@ -34,8 +35,8 @@ find_package(catkin REQUIRED COMPONENTS
 ###################################
 catkin_package(
 #  INCLUDE_DIRS include
-  CATKIN_DEPENDS pcl_conversions pcl_ros roscpp sensor_msgs
-  tf2_geometry_msgs
+#  CATKIN_DEPENDS pcl_conversions pcl_ros roscpp sensor_msgs
+#  tf2_geometry_msgs
 )
 
 ###########
@@ -51,11 +52,11 @@ include_directories(
 
 add_executable(pcl_processing src/pcl_processing.cpp)
 add_executable(sep_processing src/sep_processing.cpp)
-add_executable(people_processing src/people_processing.cpp)
+#add_executable(people_processing src/people_processing.cpp)
 
 target_link_libraries(pcl_processing ${catkin_LIBRARIES})
 target_link_libraries(sep_processing ${catkin_LIBRARIES})
-target_link_libraries(people_processing ${catkin_LIBRARIES})
+#target_link_libraries(people_processing ${catkin_LIBRARIES})
 
 
 ## Add folders to be run by python nosetests
