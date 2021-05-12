@@ -48,7 +48,7 @@ rosrun pointcloud_processing pcl_processing
 ```
 
 ### Test with Lidar
-0) Complie packages: pointclout_processing, transform_pointcloud, rviz_tools_py
+0) Complie packages: pointcloud_processing, transform_pointcloud, rviz_tools_py
 1) launch rgb camera node (or robot)
 2) launch darknet_ros (or retinanet_ros)
 ```
