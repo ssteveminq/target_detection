@@ -47,3 +47,24 @@ roslaunch darknet_ros yolov_3.launch
 rosrun pointcloud_processing pcl_processing
 ```
 
+### Test with Lidar
+0) Complie packages: pointclout_processing, transform_pointcloud, rviz_tools_py
+1) launch rgb camera node (or robot)
+2) launch darknet_ros (or retinanet_ros)
+```
+roslaunch darknet_ros yolov_3.launch
+```
+3)  launch transform_pointcloud (this node will convert frame_id of pcl data), 
+```
+roslaunch transform_pointcloud transform.launch
+```
+- check pcl data is in target frame_id in launch file and output topic name is changed to : pointcloud_transformer/output_pcl2
+
+4) rosrun rviz_tools_py fov_demo.py
+- Parameter should be set: the width, hegiht resolution of rgb image,and the frame_id of rgb image 
+- You should change these value in fov_demo.py
+- WIDTH_RES, HEIGHT_RES, _SENSOR_TF
+
+6) roslaunch pointcloud_processing sep_processing.launch
+
+- current target class is chair. you might change this clas in sep_processing.cpp directly at this moment. will work on configuration later.
