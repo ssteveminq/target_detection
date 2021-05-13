@@ -10,7 +10,7 @@
   <arg name="device_type"         default="d435i"/>
   <arg name="json_file_path"      default=""/>
   <arg name="camera"              default="camera"/>
-  <arg name="tf_prefix"           default="$(arg camera)"/>
+  <arg name="tf_prefix"           default="walrus/realsense_front"/>
   <arg name="external_manager"    default="false"/>
   <arg name="manager"             default="realsense2_camera_manager"/>
   <arg name="output"              default="screen"/>
@@ -67,7 +67,7 @@
   <arg name="unite_imu_method"          default=""/>
   <arg name="topic_odom_in"             default="odom_in"/>
   <arg name="calib_odom_file"           default=""/>
-  <arg name="publish_odom_tf"           default="true"/>
+  <arg name="publish_odom_tf"           default="false"/>
 
   <arg name="stereo_module/exposure/1"  default="7500"/>
   <arg name="stereo_module/gain/1"      default="16"/>
