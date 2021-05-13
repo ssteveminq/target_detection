@@ -18,6 +18,7 @@ add_message_files(
     handle_position.msg
     ObjectInfo.msg
     ObjectInfoArray.msg
+    fov_positions.msg
 #    BoundingBoxes.msg
 )
 
