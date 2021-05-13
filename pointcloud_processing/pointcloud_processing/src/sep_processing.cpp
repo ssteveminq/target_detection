@@ -191,7 +191,7 @@ pcloud_cb (const sensor_msgs::PointCloud2ConstPtr& input_cloud)
              }
           }
       }
-      //ROS_INFO("indices.size() = %d", indices_gf.size());
+      ROS_INFO("indices.size() = %d", indices_gf.size());
 
 
       // Get cloud width and height
@@ -212,7 +212,7 @@ pcloud_cb (const sensor_msgs::PointCloud2ConstPtr& input_cloud)
     int ymax                = current_boxes.bounding_boxes[i].ymax;
     float probability = current_boxes.bounding_boxes[i].probability;
     if(probability<0.6)
-        return;
+        continue;
     ROS_INFO("object_name: %s, xmin: %d, xmax: %d, ymin: %d, ymax: %d", object_name.c_str(), xmin, xmax, ymin, ymax );
     //object_name="bottle";
 
@@ -326,7 +326,7 @@ pcloud_cb (const sensor_msgs::PointCloud2ConstPtr& input_cloud)
   cur_obj.height = ymax-ymin;
   cur_obj.label = object_name;
   cur_obj.last_time = ros::Time::now();
-  cur_obj.average_depth=0.0;
+
   cur_obj.no_observation=false;
   cur_obj.center = centroid_abs.point;
   cur_obj.depth_change = false;

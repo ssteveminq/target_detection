@@ -62,12 +62,12 @@ from rviz_tools_py.geometry_tools import projection_point_to_plane
 # WIDTH_RES = 512
 # HEIGHT_RES = 512
 
-WIDTH_RES = 1920
-HEIGHT_RES = 1080
+WIDTH_RES = 720
+HEIGHT_RES = 1280
 
 
-_MAP_TF='odom'
-_SESNSOR_TF ='camera_rgb_frame'
+_MAP_TF='walrus/odom'
+_SESNSOR_TF ='walrus/realsense_front_link'
 # _BASE_TF = 'base_link'
 
 # Initialize the ROS Node
