@@ -201,7 +201,7 @@ cloud_cb (const sensor_msgs::PointCloud2ConstPtr& input_cloud, const darknet_ros
             indices.push_back(idxx);
       }
     }
-    ROS_INFO("indices.size() = %d", indices.size());
+    ROS_INFO("indices.size() = %lu", indices.size());
 
     inliers_roi->indices = indices;
     // Create the filtering ROI object
