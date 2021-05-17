@@ -67,7 +67,7 @@ HEIGHT_RES = 1280
 
 
 _MAP_TF='walrus/odom'
-_SESNSOR_TF ='walrus/realsense_front_link'
+_SESNSOR_TF ='walrus/realsense_front_color_optical_frame'
 # _BASE_TF = 'base_link'
 
 # Initialize the ROS Node
@@ -302,9 +302,9 @@ class DrawManager(object):
                    
                       self.object_radius =0.2
                       self.object_height =0.25
-                      self.object_poseStamped.pose.position.x=self.x_pose
-                      self.object_poseStamped.pose.position.y=(mod_xmin_offset+mod_xmax_offset)*0.5
-                      self.object_poseStamped.pose.position.z=(mod_ymin_offset+mod_ymax_offset)*0.5
+                      self.object_poseStamped.pose.position.x=-(mod_ymin_offset+mod_ymax_offset)*0.5
+                      self.object_poseStamped.pose.position.y=-(mod_xmin_offset+mod_xmax_offset)*0.5
+                      self.object_poseStamped.pose.position.z=self.x_pose
                       self.object_poseStamped.pose.orientation.x=0.0
                       self.object_poseStamped.pose.orientation.y=0.0
                       self.object_poseStamped.pose.orientation.z=0.0
@@ -314,9 +314,9 @@ class DrawManager(object):
                       self.object_poseStamped.header.stamp=rospy.Time.now()
                       self.occ_pose_pub.publish(self.object_poseStamped)
 
-                      self.object_poseStamped2.pose.position=Point(self.x_pose2, self.y_pose, self.z_pose)
-                      self.object_poseStamped2.pose.position.y=(mod_xmin_offset2+mod_xmax_offset2)*0.5
-                      self.object_poseStamped2.pose.position.z=(mod_ymin_offset2+mod_ymax_offset2)*0.5
+                      self.object_poseStamped2.pose.position.x=-(mod_ymin_offset2+mod_ymax_offset2)*0.5
+                      self.object_poseStamped2.pose.position.y=-(mod_xmin_offset2+mod_xmax_offset2)*0.5
+                      self.object_poseStamped2.pose.position.z=self.x_pose2
                       self.object_poseStamped2.pose.orientation.x=0.0
                       self.object_poseStamped2.pose.orientation.y=0.0
                       self.object_poseStamped2.pose.orientation.z=0.0

@@ -116,6 +116,20 @@ void cameraInfoCb(const sensor_msgs::CameraInfoConstPtr msg)
 }
 
 
+inline PointType normalizePoint(PointType input)
+{    
+    const double denominator = std::sqrt(input.x * input.x +
+                                         input.y * input.y +
+                                         input.z * input.z);
+
+    input.x /= denominator;
+    input.y /= denominator;
+    input.z /= denominator;
+
+    return input;
+}
+
+
 /**
  * @brief Convert a point in the camera frame to (u,v) pixel coordinates
  * 
@@ -129,9 +143,14 @@ inline PixelCoords poseToPixel(const PointType &point,
 {
     PixelCoords result;
 
-    result.x = camera_info.K[0]*point.x + camera_info.K[2]*point.z;
-    result.y = camera_info.K[4]*point.y + camera_info.K[5]*point.z;
-    result.z = point.z;
+    const PointType norm_point = normalizePoint(point);
+
+    result.x = camera_info.K[0]*norm_point.x + camera_info.K[2]*norm_point.z;
+    result.y = camera_info.K[4]*norm_point.y + camera_info.K[5]*norm_point.z;
+    result.z = norm_point.z;
+
+    ROS_INFO_STREAM("Cartesian: " << point);
+    ROS_INFO_STREAM("Pixelspace: " << result.x << " " << result.y << " " << result.z);
 
     return result;
 }
@@ -234,7 +253,7 @@ CloudPtr filterPointsInBox(const CloudPtr input,
 
     for (int i = 0; i < pixel_coordinates.size(); ++i)
     {
-        ROS_INFO_STREAM("Coords: " << pixel_coordinates[i].x << " " << pixel_coordinates[i].y << " " << pixel_coordinates[i].z);
+        //ROS_INFO_STREAM("Coords: " << pixel_coordinates[i].x << " " << pixel_coordinates[i].y << " " << pixel_coordinates[i].z);
         if (pixel_coordinates[i].x > xmin &&
             pixel_coordinates[i].x < xmax &&
             pixel_coordinates[i].y > ymin &&
