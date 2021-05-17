@@ -225,19 +225,20 @@ CloudPtr filterPointsInBox(const CloudPtr input,
                            const int ymin,
                            const int ymax)
 {
-    pcl::PointIndices::Ptr indices_in_bbox;
+    pcl::PointIndices::Ptr indices_in_bbox(new pcl::PointIndices());
     indices_in_bbox->indices.reserve(input->size());
 
     for (int i = 0; i < pixel_coordinates.size(); ++i)
     {
-        if (pixel_coordinates[i].x < xmin &&
+        if (pixel_coordinates[i].x > xmin &&
             pixel_coordinates[i].x < xmax &&
-            pixel_coordinates[i].y < ymin &&
+            pixel_coordinates[i].y > ymin &&
             pixel_coordinates[i].y < ymax)
         {
             indices_in_bbox->indices.push_back(i);
         }
     }
+    ROS_INFO_STREAM("num indices: " << indices_in_bbox->indices.size());
 
     indices_in_bbox->indices.shrink_to_fit();
 
@@ -426,7 +427,7 @@ main (int argc, char** argv)
 {
     // Initialize ROS
     ros::init (argc, argv, "pointcloud_processing");
-    nh = new ros::NodeHandle;
+    nh = new ros::NodeHandle();
 
     nh->param("DARKNET_TOPIC", DARKNET_TOPIC, {"/darknet_ros/bounding_boxes"});
     nh->param("RETINANET_TOPIC", RETINANET_TOPIC, {"/retina_ros/bounding_boxes"});
@@ -439,11 +440,13 @@ main (int argc, char** argv)
     nh->param("PCL_VISUAL", PCL_VISUAL, {true});
     
     std::map<std::string, std::string> temp_map;
-    if (!nh->getParam("object_classes", temp_map))
+    if (!nh->hasParam("/sep_processing_node/object_classes"))
     {
         ROS_ERROR("Failed to load dictionary parameter 'object_classes'.");
         return 1;
     }
+    nh->getParam("/sep_processing_node/object_classes", temp_map);
+
 
     try
     {
