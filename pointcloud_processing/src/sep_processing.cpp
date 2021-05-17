@@ -90,9 +90,10 @@ typedef struct
 {
     int32_t x;
     int32_t y;
+    double z;
 } PixelCoords;
 
-void BBoxCb(const darknet_ros_msgs::BoundingBoxesConstPtr& input_detection)
+void bBoxCb(const darknet_ros_msgs::BoundingBoxesConstPtr& input_detection)
 {
     //ROS_INFO("bounding_box callback");
     current_boxes = *input_detection;
@@ -101,7 +102,7 @@ void BBoxCb(const darknet_ros_msgs::BoundingBoxesConstPtr& input_detection)
 }
 
 
-void FoVRegionCb(const pointcloud_processing_msgs::fov_positionsConstPtr& fov_region_)
+void foVRegionCb(const pointcloud_processing_msgs::fov_positionsConstPtr& fov_region_)
 {
     //ROS_INFO("fov_regions callback");
     current_fov=*fov_region_;
@@ -109,7 +110,7 @@ void FoVRegionCb(const pointcloud_processing_msgs::fov_positionsConstPtr& fov_re
 }
 
 
-void CameraInfoCb(const sensor_msgs::CameraInfoConstPtr msg)
+void cameraInfoCb(const sensor_msgs::CameraInfoConstPtr msg)
 {
     camera_info = *msg;
 }
@@ -130,6 +131,7 @@ inline PixelCoords poseToPixel(const PointType &point,
 
     result.x = camera_info.K[0]*point.x + camera_info.K[2]*point.z;
     result.y = camera_info.K[4]*point.y + camera_info.K[5]*point.z;
+    result.z = point.z;
 
     return result;
 }
@@ -228,17 +230,21 @@ CloudPtr filterPointsInBox(const CloudPtr input,
     pcl::PointIndices::Ptr indices_in_bbox(new pcl::PointIndices());
     indices_in_bbox->indices.reserve(input->size());
 
+    ROS_INFO_STREAM("BBox: " << xmin << " " << xmax << " " << ymin << " " << ymax);
+
     for (int i = 0; i < pixel_coordinates.size(); ++i)
     {
+        ROS_INFO_STREAM("Coords: " << pixel_coordinates[i].x << " " << pixel_coordinates[i].y << " " << pixel_coordinates[i].z);
         if (pixel_coordinates[i].x > xmin &&
             pixel_coordinates[i].x < xmax &&
             pixel_coordinates[i].y > ymin &&
-            pixel_coordinates[i].y < ymax)
+            pixel_coordinates[i].y < ymax &&
+            pixel_coordinates[i].z > 0)
         {
             indices_in_bbox->indices.push_back(i);
         }
     }
-    ROS_INFO_STREAM("num indices: " << indices_in_bbox->indices.size());
+    ROS_INFO_STREAM("num bbox indices: " << indices_in_bbox->indices.size());
 
     indices_in_bbox->indices.shrink_to_fit();
 
@@ -348,23 +354,28 @@ void pointCloudCb(const sensor_msgs::PointCloud2ConstPtr& input_cloud)
     camera_fov_filter.filter(*cloud_filtered);
 
     // ----------------------Voxel Downsampling----------------------------------
+    CloudPtr cloud_downsampled(new Cloud);
     pcl::VoxelGrid<PointType> sor_voxelgrid;
     sor_voxelgrid.setInputCloud(cloud_filtered);
     sor_voxelgrid.setLeafSize(0.05, 0.05, 0.05); //size of the grid
-    sor_voxelgrid.filter(*cloud_filtered);
+    sor_voxelgrid.filter(*cloud_downsampled);
 
     // ---------------------StatisticalOutlierRemoval--------------------
     // Remove statistical outliers from the downsampled cloud
+    CloudPtr cloud_denoised(new Cloud);
     pcl::StatisticalOutlierRemoval<PointType> sor_noise;
-    sor_noise.setInputCloud(cloud_filtered);
+    sor_noise.setInputCloud(cloud_downsampled);
     sor_noise.setMeanK(50);
     sor_noise.setStddevMulThresh(1.0);
-    sor_noise.filter(*cloud_filtered);
+    sor_noise.filter(*cloud_denoised);
 
     // remove NaN points from the cloud
+    CloudPtr cloud_nan_filtered(new Cloud);
     CloudPtr nanfiltered_cloud(new Cloud);
     std::vector<int> rindices;
-    pcl::removeNaNFromPointCloud(*cloud_filtered, *cloud_filtered, rindices);
+    pcl::removeNaNFromPointCloud(*cloud_denoised, *cloud_nan_filtered, rindices);
+
+    ROS_INFO_STREAM("filtered fov indices: " << cloud_nan_filtered->size());
 
     // output
     vision_msgs::Detection2DArray detected_objects;
@@ -373,7 +384,7 @@ void pointCloudCb(const sensor_msgs::PointCloud2ConstPtr& input_cloud)
     detected_objects.detections.reserve(current_boxes.bounding_boxes.size());
 
     // produce pixel-space coordinates
-    const std::vector<PixelCoords> pixel_coordinates = convertCloudToPixelCoords(cloud_filtered, camera_info);
+    const std::vector<PixelCoords> pixel_coordinates = convertCloudToPixelCoords(cloud_nan_filtered, camera_info);
 
     /////////////////////////////////////////////////////////////
     for(const darknet_ros_msgs::BoundingBox &box : current_boxes.bounding_boxes)
@@ -382,7 +393,7 @@ void pointCloudCb(const sensor_msgs::PointCloud2ConstPtr& input_cloud)
         if (box.probability >= confidence_threshold)
         {            
             // ----------------------Extract points in the bounding box-----------
-            const CloudPtr cloud_in_bbox = filterPointsInBox(cloud_filtered,
+            const CloudPtr cloud_in_bbox = filterPointsInBox(cloud_nan_filtered,
                                                              pixel_coordinates,
                                                              box.xmin,
                                                              box.xmax,
@@ -458,10 +469,10 @@ main (int argc, char** argv)
     }
 
     // Initialize subscribers to darknet detection and pointcloud
-    ros::Subscriber bbox_sub = nh->subscribe<darknet_ros_msgs::BoundingBoxes>(DARKNET_TOPIC, 100, BBoxCb); 
+    ros::Subscriber bbox_sub = nh->subscribe<darknet_ros_msgs::BoundingBoxes>(DARKNET_TOPIC, 100, bBoxCb); 
     ros::Subscriber cloud_sub = nh->subscribe<sensor_msgs::PointCloud2>(PCL_TOPIC, 100, pointCloudCb);
-    ros::Subscriber fovregion_sub = nh->subscribe<pointcloud_processing_msgs::fov_positions>(FOV_TOPIC, 100, FoVRegionCb);
-    ros::Subscriber camera_info_sub = nh->subscribe<sensor_msgs::CameraInfo>("camera_info", 100, CameraInfoCb);
+    ros::Subscriber fovregion_sub = nh->subscribe<pointcloud_processing_msgs::fov_positions>(FOV_TOPIC, 100, foVRegionCb);
+    ros::Subscriber camera_info_sub = nh->subscribe<sensor_msgs::CameraInfo>("camera_info", 100, cameraInfoCb);
 
     // Initialize transform listener
     //tf::TransformListener listener(ros::Duration(10));
