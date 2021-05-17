@@ -20,6 +20,8 @@ find_package(catkin REQUIRED COMPONENTS
   pointcloud_processing_msgs
   tf
   tf2_geometry_msgs
+  sensor_msgs
+  vision_msgs
 )
 
 ## System dependencies are found with CMake's conventions
@@ -35,8 +37,20 @@ find_package(catkin REQUIRED COMPONENTS
 ###################################
 catkin_package(
 #  INCLUDE_DIRS include
-#  CATKIN_DEPENDS pcl_conversions pcl_ros roscpp sensor_msgs
-#  tf2_geometry_msgs
+  CATKIN_DEPENDS pcl_conversions
+  pcl_ros
+  roscpp
+  sensor_msgs
+  darknet_ros_msgs
+  message_filters
+  visualization_msgs
+  geometry_msgs
+  pointcloud_processing_msgs
+  tf
+  tf2_geometry_msgs
+  sensor_msgs
+  vision_msgs
+  tf2_geometry_msgs
 )
 
 ###########

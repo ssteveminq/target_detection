@@ -6,7 +6,6 @@
 #include <geometry_msgs/PoseArray.h>
 #include <geometry_msgs/Vector3.h>
 #include <geometry_msgs/Vector3Stamped.h>
-#include <visualization_msgs/Marker.h>
 #include <pointcloud_processing_msgs/ObjectInfo.h>
 #include <pointcloud_processing_msgs/ObjectInfoArray.h>
 #include <pointcloud_processing_msgs/fov_positions.h>
@@ -14,6 +13,10 @@
 #include <tf/transform_listener.h>
 #include <tf2_geometry_msgs/tf2_geometry_msgs.h>
 #include <tf2_ros/transform_listener.h>
+#include <visualization_msgs/Marker.h>
+#include <sensor_msgs/CameraInfo.h>
+#include <vision_msgs/Detection2DArray.h>
+
 #include <math.h> 
 
 // Approximate time policy
@@ -45,6 +48,9 @@ typedef pcl::PointXYZRGB PointType;
 typedef pcl::PointCloud<PointType> Cloud;
 typedef Cloud::Ptr CloudPtr;
 
+typedef int ObjectClassID;
+typedef std::string ObjectClassName;
+typedef std::map<ObjectClassName, ObjectClassID> ObjectsMap;
 
 const int QUEUE_SIZE = 10;
 std::string DARKNET_TOPIC;
@@ -60,13 +66,8 @@ bool PCL_VISUAL;
 // ROS Nodehandle
 ros::NodeHandle *nh;
 
-// Initialize publishers
-ros::Publisher pub_target;
-ros::Publisher pub_target_centroid;
-ros::Publisher pub_target_poses;
-ros::Publisher pub_target_point;
-ros::Publisher pub_target_list;
-ros::Publisher pub_ObjectInfos;
+// Publishers
+ros::Publisher detected_objects_pub;
 
 // Initialize transform listener
 tf::TransformListener* lst;
@@ -75,17 +76,23 @@ tf2_ros::Buffer* pbuffer;
 // caches for callback data
 darknet_ros_msgs::BoundingBoxes current_boxes;
 pointcloud_processing_msgs::fov_positions current_fov;
+sensor_msgs::CameraInfo camera_info;
 
 //map
-std::map<std::string, pointcloud_processing_msgs::ObjectInfo> labels_to_obj;
-std::set<std::string> target_string;
+ObjectsMap object_classes;
 
 bool received_first_message=false;
 bool received_first_message_bbox =false;
 bool received_first_message_cloud =false;
 bool received_fov_region=false;
 
-void bbox_cb (const darknet_ros_msgs::BoundingBoxesConstPtr& input_detection)
+typedef struct
+{
+    int32_t x;
+    int32_t y;
+} PixelCoords;
+
+void BBoxCb(const darknet_ros_msgs::BoundingBoxesConstPtr& input_detection)
 {
     //ROS_INFO("bounding_box callback");
     current_boxes = *input_detection;
@@ -94,7 +101,7 @@ void bbox_cb (const darknet_ros_msgs::BoundingBoxesConstPtr& input_detection)
 }
 
 
-void fovregion_cb (const pointcloud_processing_msgs::fov_positionsConstPtr& fov_region_)
+void FoVRegionCb(const pointcloud_processing_msgs::fov_positionsConstPtr& fov_region_)
 {
     //ROS_INFO("fov_regions callback");
     current_fov=*fov_region_;
@@ -102,8 +109,152 @@ void fovregion_cb (const pointcloud_processing_msgs::fov_positionsConstPtr& fov_
 }
 
 
+void CameraInfoCb(const sensor_msgs::CameraInfoConstPtr msg)
+{
+    camera_info = *msg;
+}
 
-void pcloud_cb (const sensor_msgs::PointCloud2ConstPtr& input_cloud)
+
+/**
+ * @brief Convert a point in the camera frame to (u,v) pixel coordinates
+ * 
+ * @param point The cartesian point to convert
+ * @param camera_info A 3x3 matrix intrinsic to the camera.
+ * 
+ * @return A pair containing the (x,y) pixel coordinates.
+ */
+inline PixelCoords poseToPixel(const PointType &point,
+                               const sensor_msgs::CameraInfo &camera_info)
+{
+    PixelCoords result;
+
+    result.x = camera_info.K[0]*point.x + camera_info.K[2]*point.z;
+    result.y = camera_info.K[4]*point.y + camera_info.K[5]*point.z;
+
+    return result;
+}
+
+
+std::vector<PixelCoords> convertCloudToPixelCoords(const CloudPtr cloud,
+                                                   const sensor_msgs::CameraInfo &camera_info)
+{
+    std::vector<PixelCoords> output;
+    output.reserve(cloud->size());
+
+    for (const PointType &point : cloud->points)
+    {
+        output.push_back( poseToPixel(point, camera_info) );
+    }
+
+    return output;
+}
+
+
+ObjectClassID getObjectID(const ObjectClassName class_name, const ObjectsMap &map)
+{
+    ObjectClassID class_id;
+
+    try
+    {
+        class_id = map.at(class_name);
+    }
+    catch(const std::out_of_range& e)
+    {
+        ROS_ERROR("getObjectID() - No class ID found for name %s", class_name.c_str());
+        std::cerr << e.what() << '\n';
+        return ObjectClassID(NAN);
+    }
+
+    return class_id;
+}
+
+
+ObjectsMap convertClassesMap(std::map<std::string, std::string> input)
+{
+    ObjectsMap output;
+
+    for (const std::map<std::string, std::string>::value_type &pair : input)
+    {
+        output[pair.first] = std::stoi(pair.second);
+    }
+
+    return output;
+}
+
+
+CloudPtr filterPointsInFoV(const CloudPtr input,
+                           const std::vector<PixelCoords> &pixel_coordinates,
+                           const int xmin,
+                           const int xmax,
+                           const int ymin,
+                           const int ymax)
+{
+    pcl::PointIndices::Ptr indices_in_bbox;
+    indices_in_bbox->indices.reserve(input->size());
+
+    for (int i = 0; i < pixel_coordinates.size(); ++i)
+    {
+        if (pixel_coordinates[i].x < xmin &&
+            pixel_coordinates[i].x < xmax &&
+            pixel_coordinates[i].y < ymin &&
+            pixel_coordinates[i].y < ymax)
+        {
+            indices_in_bbox->indices.push_back(i);
+        }
+    }
+
+    indices_in_bbox->indices.shrink_to_fit();
+
+    CloudPtr cloud_in_bbox(new Cloud);
+    pcl::ExtractIndices<PointType> camera_fov_filter;
+
+    // Extract the inliers  of the ROI
+    camera_fov_filter.setInputCloud(input);
+    camera_fov_filter.setIndices(indices_in_bbox);
+    camera_fov_filter.setNegative(false);
+    camera_fov_filter.filter(*cloud_in_bbox);
+
+    return cloud_in_bbox;
+}
+
+
+CloudPtr filterPointsInBox(const CloudPtr input,
+                           const std::vector<PixelCoords> &pixel_coordinates,
+                           const int xmin,
+                           const int xmax,
+                           const int ymin,
+                           const int ymax)
+{
+    pcl::PointIndices::Ptr indices_in_bbox;
+    indices_in_bbox->indices.reserve(input->size());
+
+    for (int i = 0; i < pixel_coordinates.size(); ++i)
+    {
+        if (pixel_coordinates[i].x < xmin &&
+            pixel_coordinates[i].x < xmax &&
+            pixel_coordinates[i].y < ymin &&
+            pixel_coordinates[i].y < ymax)
+        {
+            indices_in_bbox->indices.push_back(i);
+        }
+    }
+
+    indices_in_bbox->indices.shrink_to_fit();
+
+    CloudPtr cloud_in_bbox(new Cloud);
+    pcl::ExtractIndices<PointType> camera_fov_filter;
+
+    // Extract the inliers  of the ROI
+    camera_fov_filter.setInputCloud(input);
+    camera_fov_filter.setIndices(indices_in_bbox);
+    camera_fov_filter.setNegative(false);
+    camera_fov_filter.filter(*cloud_in_bbox);
+
+    return cloud_in_bbox;
+}
+
+
+void pointCloudCb(const sensor_msgs::PointCloud2ConstPtr& input_cloud)
 {
     received_first_message_cloud = true;
 
@@ -123,8 +274,8 @@ void pcloud_cb (const sensor_msgs::PointCloud2ConstPtr& input_cloud)
     received_first_message = true;
 
     // Initialize containers for clouds
-    CloudPtr cloud                  (new Cloud);
-    CloudPtr cloud_target           (new Cloud);
+    CloudPtr cloud(new Cloud);
+    CloudPtr cloud_target(new Cloud);
 
     // Initialize container for object poses
     geometry_msgs::PoseArray target_poses;
@@ -144,21 +295,11 @@ void pcloud_cb (const sensor_msgs::PointCloud2ConstPtr& input_cloud)
     centroid_target_list.scale.y = 0.05;
     centroid_target_list.scale.z = 0.05;
 
-    pointcloud_processing_msgs::ObjectInfoArray objectsarray;
-
-    // Initialize container for auxiliary clouds
-    CloudPtr cloud_filtered_roi            (new Cloud);
-    CloudPtr cloud_filtered_voxelgrid      (new Cloud);
-    CloudPtr cloud_filtered_sor            (new Cloud);
-    CloudPtr cloud_filtered_xyz            (new Cloud);
-    CloudPtr cloud_filtered_inplane        (new Cloud);
-    CloudPtr cloud_filtered_outplane       (new Cloud);
-
     // Convert sensor_msgs::PointCloud2 to pcl::PointCloud
     pcl::fromROSMsg(*input_cloud, *cloud);
 
     // Initialize container for inliers of the ROI
-    pcl::PointIndices::Ptr inliers_roi (new pcl::PointIndices());
+    pcl::PointIndices::Ptr inliers_camera_fov(new pcl::PointIndices());
 
     //check pcl and rgb frames are using same frame_id 
     if (input_cloud->header.frame_id != current_fov.header.frame_id)
@@ -167,7 +308,7 @@ void pcloud_cb (const sensor_msgs::PointCloud2ConstPtr& input_cloud)
         return;
     }
 
-    inliers_roi->indices.reserve(cloud->size());
+    inliers_camera_fov->indices.reserve(cloud->size());
 
     //Check the 3D FOV region to gather if xyz of point cloud data are within 3D FOV region:
     //checking two points current_fov.position[0] // current_fov.positions[1]
@@ -179,152 +320,101 @@ void pcloud_cb (const sensor_msgs::PointCloud2ConstPtr& input_cloud)
             {
                 if( ((cloud->points[k].x-current_fov.positions[0].x) >0.5) && (abs(cloud->points[k].x-current_fov.positions[1].x) <3.0))
                 {
-                    inliers_roi->indices.push_back(k);
+                    inliers_camera_fov->indices.push_back(k);
                 }
             }
         }
     }
 
-    inliers_roi->indices.shrink_to_fit();
+    inliers_camera_fov->indices.shrink_to_fit();
 
-    if (inliers_roi->indices.empty())
+    if (inliers_camera_fov->indices.empty())
     {
         ROS_WARN("No pointcloud data found within the camera field of view.");
         return;
     }
 
 
-    // -------------------ROI extraction------------------------------
-    // Create the filtering ROI object
-    pcl::ExtractIndices<PointType> extract_roi;
+    // -------------------Extraction of points in the camera FOV------------------------------
+    // Create the filtering object
+    CloudPtr cloud_filtered(new Cloud);
+    pcl::ExtractIndices<PointType> camera_fov_filter;
 
     // Extract the inliers  of the ROI
-    extract_roi.setInputCloud (cloud);
-    extract_roi.setIndices (inliers_roi);
-    extract_roi.setNegative (false);
-    extract_roi.filter (*cloud_filtered_roi);
+    camera_fov_filter.setInputCloud(cloud);
+    camera_fov_filter.setIndices(inliers_camera_fov);
+    camera_fov_filter.setNegative(false);
+    camera_fov_filter.filter(*cloud_filtered);
 
-    // ----------------------VoxelGrid----------------------------------
-    // Perform voxel downsampling
+    // ----------------------Voxel Downsampling----------------------------------
     pcl::VoxelGrid<PointType> sor_voxelgrid;
-    sor_voxelgrid.setInputCloud(cloud_filtered_roi);
+    sor_voxelgrid.setInputCloud(cloud_filtered);
     sor_voxelgrid.setLeafSize(0.05, 0.05, 0.05); //size of the grid
-    sor_voxelgrid.filter(*cloud_filtered_voxelgrid);
+    sor_voxelgrid.filter(*cloud_filtered);
 
     // ---------------------StatisticalOutlierRemoval--------------------
     // Remove statistical outliers from the downsampled cloud
     pcl::StatisticalOutlierRemoval<PointType> sor_noise;
+    sor_noise.setInputCloud(cloud_filtered);
+    sor_noise.setMeanK(50);
+    sor_noise.setStddevMulThresh(1.0);
+    sor_noise.filter(*cloud_filtered);
 
-    // Remove noise
-    //sor_noise.setInputCloud (cloud_filtered_roi);
-    sor_noise.setInputCloud (cloud_filtered_voxelgrid);
-    sor_noise.setMeanK (50);
-    sor_noise.setStddevMulThresh (1.0);
-    sor_noise.filter (*cloud_filtered_sor);
-
-    //remove NaN points from the cloud
-    CloudPtr nanfiltered_cloud (new Cloud);
+    // remove NaN points from the cloud
+    CloudPtr nanfiltered_cloud(new Cloud);
     std::vector<int> rindices;
-    pcl::removeNaNFromPointCloud(*cloud_filtered_sor,*nanfiltered_cloud, rindices);
-    
+    pcl::removeNaNFromPointCloud(*cloud_filtered, *cloud_filtered, rindices);
+
+    // output
+    vision_msgs::Detection2DArray detected_objects;
+    detected_objects.header.stamp = now;
+    detected_objects.header.frame_id = input_cloud->header.frame_id;
+    detected_objects.detections.reserve(current_boxes.bounding_boxes.size());
+
+    // produce pixel-space coordinates
+    const std::vector<PixelCoords> pixel_coordinates = convertCloudToPixelCoords(cloud_filtered, camera_info);
 
     /////////////////////////////////////////////////////////////
     for(const darknet_ros_msgs::BoundingBox &box : current_boxes.bounding_boxes)
     {
-        // Unwrap darknet detection
-        const std::string object_name = box.Class;
-        const int xmin                = box.xmin;
-        const int xmax                = box.xmax;
-        const int ymin                = box.ymin;
-        const int ymax                = box.ymax;
-        const float probability       = box.probability;
-
         // do we meet the threshold for a confirmed detection?
-        if (probability >= confidence_threshold)
-        {
-            ROS_INFO("object_name: %s, xmin: %d, xmax: %d, ymin: %d, ymax: %d", object_name.c_str(), xmin, xmax, ymin, ymax );
-                
+        if (box.probability >= confidence_threshold)
+        {            
+            // ----------------------Extract points in the bounding box-----------
+            const CloudPtr cloud_in_bbox = filterPointsInBox(cloud_filtered,
+                                                             pixel_coordinates,
+                                                             box.xmin,
+                                                             box.xmax,
+                                                             box.ymin,
+                                                             box.ymax);
+            
             // ----------------------Compute centroid-----------------------------
             Eigen::Vector4f centroid_out;
-            pcl::compute3DCentroid(*cloud_filtered_sor,centroid_out); 
+            pcl::compute3DCentroid(*cloud_in_bbox, centroid_out); 
 
-            geometry_msgs::PointStamped centroid_rel;
-            geometry_msgs::PointStamped centroid_abs;
-            centroid_abs.header.frame_id = input_cloud->header.frame_id;
-            centroid_rel.header.frame_id = input_cloud->header.frame_id;
+            // add to the output
+            vision_msgs::Detection2D object;
+            object.bbox.center.x = (box.xmax + box.xmin)/2;
+            object.bbox.center.y = (box.ymax + box.ymin)/2;
+            object.bbox.size_x = box.xmax - box.xmin;
+            object.bbox.size_y = box.ymax - box.ymin;
 
-            centroid_abs.header.stamp = ros::Time(0);
-            centroid_rel.header.stamp = ros::Time(0);
+            vision_msgs::ObjectHypothesisWithPose hypothesis;
+            hypothesis.id = getObjectID(box.Class, object_classes);
+            hypothesis.score = box.probability;
+            hypothesis.pose.pose.position.x = centroid_out[0];
+            hypothesis.pose.pose.position.y = centroid_out[1];
+            hypothesis.pose.pose.position.z = centroid_out[2];
+            hypothesis.pose.pose.orientation.w = 1;
 
-            centroid_rel.point.x = centroid_out[0];
-            centroid_rel.point.y = centroid_out[1];
-            centroid_rel.point.z = centroid_out[2];
-            ROS_INFO("rel-x: %.2lf, y: %.2lf, z: %.2lf",centroid_out[0], centroid_out[1],centroid_out[2]);
+            object.results.push_back(hypothesis);
 
-            // ---------------Create detected object reference frame-------------
-            geometry_msgs::PoseStamped object_pose;
-
-            object_pose.header.stamp= input_cloud->header.stamp;
-            object_pose.header.frame_id = input_cloud->header.frame_id;
-            object_pose.pose.position.x = centroid_rel.point.x;
-            object_pose.pose.position.y = centroid_rel.point.y;
-            object_pose.pose.position.z = centroid_rel.point.z;
-
-            pointcloud_processing_msgs::ObjectInfo cur_obj;
-            cur_obj.x = xmin;
-            cur_obj.y = ymin;
-            cur_obj.width = xmax-xmin;
-            cur_obj.height = ymax-ymin;
-            cur_obj.label = object_name;
-            cur_obj.last_time = now;
-            cur_obj.average_depth=0.0;
-            cur_obj.no_observation=false;
-            cur_obj.center = centroid_abs.point;
-            cur_obj.depth_change = false;
-            cur_obj.occ_objects = false;
-            cur_obj.is_target = target_string.count(object_name);
-                
-            // ---------------Store resultant cloud and centroid------------------
-            ROS_INFO("object_name: %s", object_name.c_str());
-            if (object_name == TARGET_CLASS)
-            {
-                ROS_INFO("%s", TARGET_CLASS.c_str());
-                *cloud_target += *cloud_filtered_sor;
-                centroid_target_list.points.push_back(centroid_rel.point);
-                target_poses.poses.push_back(object_pose.pose);
-            }
-            else
-            {
-                ROS_INFO("non-target object %s is detectedd", object_name.c_str());
-            }
-
-            // Else if the label exist, check the position
-            labels_to_obj[object_name] = cur_obj;
-
-            objectsarray.objectinfos.push_back(cur_obj);
+            detected_objects.detections.push_back(object);
         }
     }
 
-    //publish data
-    pub_ObjectInfos.publish(objectsarray);
-    
-    // Create a container for the result data.
-    //sensor_msgs::PointCloud2 output_bottle;
-
-    // Convert pcl::PointCloud to sensor_msgs::PointCloud2
-    //pcl::toROSMsg(*cloud_target,output_target;
-
-    // Set output frame as the input frame
-    //output_target.header.frame_id           = input_cloud->header.frame_id;
-
-    // Publish the data.
-    //pub_target.publish (output_target;
-
-    // Publish markers
-    pub_target_centroid.publish(centroid_target_list);
-
-    // Publish poses
-    pub_target_poses.publish(target_poses);
+    // publish results
+    detected_objects_pub.publish(detected_objects);
 
     ROS_INFO("Pointcloud processed");
 }
@@ -347,16 +437,28 @@ main (int argc, char** argv)
     nh->param("TARGET_CLASS", TARGET_CLASS, {"chair"});
     nh->param("VISUAL", VISUAL, {true});
     nh->param("PCL_VISUAL", PCL_VISUAL, {true});
+    
+    std::map<std::string, std::string> temp_map;
+    if (!nh->getParam("object_classes", temp_map))
+    {
+        ROS_ERROR("Failed to load dictionary parameter 'object_classes'.");
+        return 1;
+    }
 
-    target_string.emplace(TARGET_CLASS);
+    try
+    {
+        object_classes = convertClassesMap(temp_map);
+    } catch(std::invalid_argument ex)
+    {
+        ROS_FATAL("Invalid object_classes parameter.");
+        return 1;
+    }
 
     // Initialize subscribers to darknet detection and pointcloud
-    ros::Subscriber bbox_sub;
-    ros::Subscriber cloud_sub;
-    ros::Subscriber fovregion_sub;
-    bbox_sub = nh->subscribe<darknet_ros_msgs::BoundingBoxes>(DARKNET_TOPIC, 100, bbox_cb); 
-    cloud_sub = nh->subscribe<sensor_msgs::PointCloud2>(PCL_TOPIC, 100, pcloud_cb );
-    fovregion_sub = nh->subscribe<pointcloud_processing_msgs::fov_positions>(FOV_TOPIC, 100, fovregion_cb );
+    ros::Subscriber bbox_sub = nh->subscribe<darknet_ros_msgs::BoundingBoxes>(DARKNET_TOPIC, 100, BBoxCb); 
+    ros::Subscriber cloud_sub = nh->subscribe<sensor_msgs::PointCloud2>(PCL_TOPIC, 100, pointCloudCb);
+    ros::Subscriber fovregion_sub = nh->subscribe<pointcloud_processing_msgs::fov_positions>(FOV_TOPIC, 100, FoVRegionCb);
+    ros::Subscriber camera_info_sub = nh->subscribe<sensor_msgs::CameraInfo>("camera_info", 100, CameraInfoCb);
 
     // Initialize transform listener
     //tf::TransformListener listener(ros::Duration(10));
@@ -368,18 +470,7 @@ main (int argc, char** argv)
     //sync.registerCallback(boost::bind(&cloud_cb, _1, _2));
 
     // Create a ROS publisher for the output point cloud
-    pub_target = nh->advertise<sensor_msgs::PointCloud2> ("pcl_target", 1);
-
-    // Create a ROS publisher for the output point cloud centroid markers
-    pub_target_centroid = nh->advertise<visualization_msgs::Marker> ("target_centroids", 1);
-
-    //Create a ROS publisher for the detected  points
-    pub_target_point= nh->advertise<geometry_msgs::PointStamped> ("/target_center", 1);
-
-    // Create a ROS publisher for the detected poses
-    pub_target_poses = nh->advertise<geometry_msgs::PoseArray> ("/target_poses", 1);
-
-    pub_ObjectInfos = nh->advertise<pointcloud_processing_msgs::ObjectInfoArray> ("ObjectInfos", 1);
+    detected_objects_pub = nh->advertise<vision_msgs::Detection2DArray>("detected_objects", 1);
 
     ROS_INFO("Started. Waiting for inputs.");
     while (ros::ok() && (!received_first_message_bbox && !received_first_message_cloud)) {
@@ -389,4 +480,6 @@ main (int argc, char** argv)
         
     // Spin
     ros::spin ();
+
+    return 0;
 }
