@@ -74,9 +74,9 @@ tf::TransformListener* lst;
 tf2_ros::Buffer* pbuffer;
 
 // caches for callback data
-darknet_ros_msgs::BoundingBoxes current_boxes;
+darknet_ros_msgs::BoundingBoxes current_boxes_;
 pointcloud_processing_msgs::fov_positions current_fov;
-sensor_msgs::CameraInfo camera_info;
+sensor_msgs::CameraInfo camera_info_;
 
 //map
 ObjectsMap object_classes;
@@ -96,7 +96,7 @@ typedef struct
 void bBoxCb(const darknet_ros_msgs::BoundingBoxesConstPtr& input_detection)
 {
     //ROS_INFO("bounding_box callback");
-    current_boxes = *input_detection;
+    current_boxes_ = *input_detection;
 
     received_first_message_bbox =true;
 }
@@ -112,7 +112,7 @@ void foVRegionCb(const pointcloud_processing_msgs::fov_positionsConstPtr& fov_re
 
 void cameraInfoCb(const sensor_msgs::CameraInfoConstPtr msg)
 {
-    camera_info = *msg;
+    camera_info_ = *msg;
 }
 
 
@@ -205,37 +205,34 @@ ObjectsMap convertClassesMap(std::map<std::string, std::string> input)
 
 CloudPtr filterPointsInFoV(const CloudPtr input,
                            const std::vector<PixelCoords> &pixel_coordinates,
-                           const int xmin,
-                           const int xmax,
-                           const int ymin,
-                           const int ymax)
+                           const int height,
+                           const int width)
 {
-    pcl::PointIndices::Ptr indices_in_bbox;
-    indices_in_bbox->indices.reserve(input->size());
+    pcl::PointIndices::Ptr indices_in_fov;
+    indices_in_fov->indices.reserve(input->size());
 
     for (int i = 0; i < pixel_coordinates.size(); ++i)
     {
-        if (pixel_coordinates[i].x < xmin &&
-            pixel_coordinates[i].x < xmax &&
-            pixel_coordinates[i].y < ymin &&
-            pixel_coordinates[i].y < ymax)
+        if (pixel_coordinates[i].z > 0 &&
+            pixel_coordinates[i].x < 0 &&
+            pixel_coordinates[i].x > width &&
+            pixel_coordinates[i].y < 0 &&
+            pixel_coordinates[i].y > height)
         {
-            indices_in_bbox->indices.push_back(i);
+            indices_in_fov->indices.push_back(i);
         }
     }
 
-    indices_in_bbox->indices.shrink_to_fit();
-
-    CloudPtr cloud_in_bbox(new Cloud);
+    CloudPtr cloud_in_fov(new Cloud);
     pcl::ExtractIndices<PointType> camera_fov_filter;
 
     // Extract the inliers  of the ROI
     camera_fov_filter.setInputCloud(input);
-    camera_fov_filter.setIndices(indices_in_bbox);
+    camera_fov_filter.setIndices(indices_in_fov);
     camera_fov_filter.setNegative(false);
-    camera_fov_filter.filter(*cloud_in_bbox);
+    camera_fov_filter.filter(*cloud_in_fov);
 
-    return cloud_in_bbox;
+    return cloud_in_fov;
 }
 
 
@@ -254,27 +251,25 @@ CloudPtr filterPointsInBox(const CloudPtr input,
     for (int i = 0; i < pixel_coordinates.size(); ++i)
     {
         //ROS_INFO_STREAM("Coords: " << pixel_coordinates[i].x << " " << pixel_coordinates[i].y << " " << pixel_coordinates[i].z);
-        if (pixel_coordinates[i].x > xmin &&
+        if (pixel_coordinates[i].z > 0 &&
+            pixel_coordinates[i].x > xmin &&
             pixel_coordinates[i].x < xmax &&
             pixel_coordinates[i].y > ymin &&
-            pixel_coordinates[i].y < ymax &&
-            pixel_coordinates[i].z > 0)
+            pixel_coordinates[i].y < ymax)
         {
             indices_in_bbox->indices.push_back(i);
         }
     }
     ROS_INFO_STREAM("num bbox indices: " << indices_in_bbox->indices.size());
 
-    indices_in_bbox->indices.shrink_to_fit();
-
     CloudPtr cloud_in_bbox(new Cloud);
-    pcl::ExtractIndices<PointType> camera_fov_filter;
+    pcl::ExtractIndices<PointType> bbox_filter;
 
     // Extract the inliers  of the ROI
-    camera_fov_filter.setInputCloud(input);
-    camera_fov_filter.setIndices(indices_in_bbox);
-    camera_fov_filter.setNegative(false);
-    camera_fov_filter.filter(*cloud_in_bbox);
+    bbox_filter.setInputCloud(input);
+    bbox_filter.setIndices(indices_in_bbox);
+    bbox_filter.setNegative(false);
+    bbox_filter.filter(*cloud_in_bbox);
 
     return cloud_in_bbox;
 }
@@ -285,6 +280,11 @@ void pointCloudCb(const sensor_msgs::PointCloud2ConstPtr& input_cloud)
     received_first_message_cloud = true;
 
     if (!received_fov_region)
+    {
+        return;
+    }
+
+    if (camera_info_.height == 0 || camera_info_.width == 0)
     {
         return;
     }
@@ -334,49 +334,14 @@ void pointCloudCb(const sensor_msgs::PointCloud2ConstPtr& input_cloud)
         return;
     }
 
-    inliers_camera_fov->indices.reserve(cloud->size());
-
-    //Check the 3D FOV region to gather if xyz of point cloud data are within 3D FOV region:
-    //checking two points current_fov.position[0] // current_fov.positions[1]
-    for (int k = 0; k < cloud->points.size(); k++)
-    {
-        if( (abs(cloud->points[k].y-current_fov.positions[0].y) <1.0) && (abs(cloud->points[k].z-current_fov.positions[0].z) <1.0)) 
-        {
-            if( (abs(cloud->points[k].y-current_fov.positions[1].y) <2.0) && (abs(cloud->points[k].y-current_fov.positions[1].z) <2.0)) 
-            {
-                if( ((cloud->points[k].x-current_fov.positions[0].x) >0.5) && (abs(cloud->points[k].x-current_fov.positions[1].x) <3.0))
-                {
-                    inliers_camera_fov->indices.push_back(k);
-                }
-            }
-        }
-    }
-
-    inliers_camera_fov->indices.shrink_to_fit();
-
-    if (inliers_camera_fov->indices.empty())
-    {
-        ROS_WARN("No pointcloud data found within the camera field of view.");
-        return;
-    }
-
-
-    // -------------------Extraction of points in the camera FOV------------------------------
-    // Create the filtering object
-    CloudPtr cloud_filtered(new Cloud);
-    pcl::ExtractIndices<PointType> camera_fov_filter;
-
-    // Extract the inliers  of the ROI
-    camera_fov_filter.setInputCloud(cloud);
-    camera_fov_filter.setIndices(inliers_camera_fov);
-    camera_fov_filter.setNegative(false);
-    camera_fov_filter.filter(*cloud_filtered);
+    // produce pixel-space coordinates
+    const std::vector<PixelCoords> pixel_coordinates = convertCloudToPixelCoords(cloud, camera_info_);
 
     // ----------------------Voxel Downsampling----------------------------------
     CloudPtr cloud_downsampled(new Cloud);
     pcl::VoxelGrid<PointType> sor_voxelgrid;
-    sor_voxelgrid.setInputCloud(cloud_filtered);
-    sor_voxelgrid.setLeafSize(0.05, 0.05, 0.05); //size of the grid
+    sor_voxelgrid.setInputCloud(cloud);
+    sor_voxelgrid.setLeafSize(0.02, 0.02, 0.02); //size of the grid
     sor_voxelgrid.filter(*cloud_downsampled);
 
     // ---------------------StatisticalOutlierRemoval--------------------
@@ -394,25 +359,31 @@ void pointCloudCb(const sensor_msgs::PointCloud2ConstPtr& input_cloud)
     std::vector<int> rindices;
     pcl::removeNaNFromPointCloud(*cloud_denoised, *cloud_nan_filtered, rindices);
 
-    ROS_INFO_STREAM("filtered fov indices: " << cloud_nan_filtered->size());
+    // -------------------Extraction of points in the camera FOV------------------------------
+    CloudPtr cloud_fov = filterPointsInFoV(cloud_nan_filtered, pixel_coordinates, camera_info_.height, camera_info_.width);
+
+    if (cloud_fov->empty())
+    {
+        ROS_WARN("No pointcloud data found within the camera field of view.");
+        return;
+    }
+
+    ROS_INFO_STREAM("filtered fov indices: " << cloud_fov->size());
 
     // output
     vision_msgs::Detection2DArray detected_objects;
     detected_objects.header.stamp = now;
     detected_objects.header.frame_id = input_cloud->header.frame_id;
-    detected_objects.detections.reserve(current_boxes.bounding_boxes.size());
-
-    // produce pixel-space coordinates
-    const std::vector<PixelCoords> pixel_coordinates = convertCloudToPixelCoords(cloud_nan_filtered, camera_info);
+    detected_objects.detections.reserve(current_boxes_.bounding_boxes.size());
 
     /////////////////////////////////////////////////////////////
-    for(const darknet_ros_msgs::BoundingBox &box : current_boxes.bounding_boxes)
+    for(const darknet_ros_msgs::BoundingBox &box : current_boxes_.bounding_boxes)
     {
         // do we meet the threshold for a confirmed detection?
         if (box.probability >= confidence_threshold)
         {            
             // ----------------------Extract points in the bounding box-----------
-            const CloudPtr cloud_in_bbox = filterPointsInBox(cloud_nan_filtered,
+            const CloudPtr cloud_in_bbox = filterPointsInBox(cloud_fov,
                                                              pixel_coordinates,
                                                              box.xmin,
                                                              box.xmax,
