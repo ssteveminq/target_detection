@@ -61,6 +61,7 @@ std::string TARGET_FRAME;
 std::string TARGET_CLASS;
 bool VISUAL;
 bool PCL_VISUAL;
+bool debug_lidar_viz;
 
 
 // ROS Nodehandle
@@ -68,6 +69,8 @@ ros::NodeHandle *nh;
 
 // Publishers
 ros::Publisher detected_objects_pub;
+ros::Publisher lidar_fov_pub_;
+ros::Publisher lidar_bbox_pub_;
 
 // Initialize transform listener
 tf::TransformListener* lst;
@@ -226,16 +229,22 @@ CloudPtr filterPointsInFoV(const CloudPtr input,
 
     indices_in_bbox->indices.shrink_to_fit();
 
-    CloudPtr cloud_in_bbox(new Cloud);
+    CloudPtr cloud_in_fov(new Cloud);
     pcl::ExtractIndices<PointType> camera_fov_filter;
 
     // Extract the inliers  of the ROI
     camera_fov_filter.setInputCloud(input);
     camera_fov_filter.setIndices(indices_in_bbox);
     camera_fov_filter.setNegative(false);
-    camera_fov_filter.filter(*cloud_in_bbox);
+    camera_fov_filter.filter(*cloud_in_fov);
 
-    return cloud_in_bbox;
+    if (debug_lidar_viz) {
+        sensor_msgs::PointCloud2 pc2;
+        pcl::toROSMsg(*cloud_in_fov, pc2);
+        lidar_fov_pub_.publish(pc2);
+    }
+
+    return cloud_in_fov;
 }
 
 
@@ -275,6 +284,12 @@ CloudPtr filterPointsInBox(const CloudPtr input,
     camera_fov_filter.setIndices(indices_in_bbox);
     camera_fov_filter.setNegative(false);
     camera_fov_filter.filter(*cloud_in_bbox);
+
+    if (debug_lidar_viz) {
+        sensor_msgs::PointCloud2 pc2;
+        pcl::toROSMsg(*cloud_in_bbox, pc2);
+        lidar_bbox_pub_.publish(pc2);
+    }
 
     return cloud_in_bbox;
 }
@@ -468,7 +483,9 @@ main (int argc, char** argv)
     nh->param("TARGET_CLASS", TARGET_CLASS, {"chair"});
     nh->param("VISUAL", VISUAL, {true});
     nh->param("PCL_VISUAL", PCL_VISUAL, {true});
-    
+    nh->param("debug_lidar_viz", debug_lidar_viz, {false});
+
+
     std::map<std::string, std::string> temp_map;
     if (!nh->hasParam("/sep_processing_node/object_classes"))
     {
@@ -504,6 +521,11 @@ main (int argc, char** argv)
 
     // Create a ROS publisher for the output point cloud
     detected_objects_pub = nh->advertise<vision_msgs::Detection2DArray>("detected_objects", 1);
+
+    if (debug_lidar_viz) {
+        lidar_fov_pub_ = nh->advertise<sensor_msgs::PointCloud2>("lidar_fov", 1);
+        lidar_bbox_pub_ = nh->advertise<sensor_msgs::PointCloud2>("lidar_bbox", 1);
+    }
 
     ROS_INFO("Started. Waiting for inputs.");
     while (ros::ok() && (!received_first_message_bbox && !received_first_message_cloud)) {
