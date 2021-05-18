@@ -376,6 +376,9 @@ void pointCloudCb(const sensor_msgs::PointCloud2ConstPtr& input_cloud)
     detected_objects.header.frame_id = input_cloud->header.frame_id;
     detected_objects.detections.reserve(current_boxes_.bounding_boxes.size());
 
+    // produce pixel-space coordinates
+    const std::vector<PixelCoords> pixel_coordinates_fov = convertCloudToPixelCoords(cloud_fov, camera_info_);
+
     /////////////////////////////////////////////////////////////
     for(const darknet_ros_msgs::BoundingBox &box : current_boxes_.bounding_boxes)
     {
@@ -384,7 +387,7 @@ void pointCloudCb(const sensor_msgs::PointCloud2ConstPtr& input_cloud)
         {            
             // ----------------------Extract points in the bounding box-----------
             const CloudPtr cloud_in_bbox = filterPointsInBox(cloud_fov,
-                                                             pixel_coordinates,
+                                                             pixel_coordinates_fov,
                                                              box.xmin,
                                                              box.xmax,
                                                              box.ymin,
