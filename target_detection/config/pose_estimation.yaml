@@ -1,0 +1,9 @@
+DARKNET_TOPIC: darknet_ros/boundingbox
+PCL_TOPIC: points2
+TARGET_FRAME: walrus/odom
+TARGET_CLASS: chair
+VISUAL: true
+PCL_VISUAL: true
+object_classes: 
+  chair: '1'
+  microwave: '2'

@@ -154,8 +154,8 @@ cloud_cb (const sensor_msgs::PointCloud2ConstPtr& input_cloud, const darknet_ros
   int pcl_size = width*height;
   if(width==1 ||height==1)
   {
-      width = 2048;
-      height = 1536;
+      width = 640;
+      height = 480;
   
   }
   ROS_INFO("input_cloud width: %d, height: %d", width, height);
@@ -201,7 +201,7 @@ cloud_cb (const sensor_msgs::PointCloud2ConstPtr& input_cloud, const darknet_ros
             indices.push_back(idxx);
       }
     }
-    ROS_INFO("indices.size() = %d", indices.size());
+    ROS_INFO("indices.size() = %lu", indices.size());
 
     inliers_roi->indices = indices;
     // Create the filtering ROI object
@@ -484,7 +484,7 @@ main (int argc, char** argv)
   ros::NodeHandle nh;
 
   nh.param("DARKNET_TOPIC", DARKNET_TOPIC, {"/darknet_ros/bounding_boxes"});
-  nh.param("PCL_TOPIC", PCL_TOPIC, {"/points2"});
+  nh.param("PCL_TOPIC", PCL_TOPIC, {"/camera/depth/color/points"});
   nh.param("TARGET_FRAME", TARGET_FRAME, {"map"});
   nh.param("VISUAL", VISUAL, {true});
   nh.param("PCL_VISUAL", PCL_VISUAL, {true});
