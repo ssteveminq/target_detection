@@ -1,47 +1,26 @@
 #include <ros/ros.h>
-#include <geometry_msgs/Point.h>
-#include <geometry_msgs/PointStamped.h>
-#include <geometry_msgs/PoseStamped.h>
-#include <geometry_msgs/Pose.h>
-#include <geometry_msgs/PoseArray.h>
-#include <geometry_msgs/Vector3.h>
-#include <geometry_msgs/Vector3Stamped.h>
-#include <pointcloud_processing_msgs/ObjectInfo.h>
-#include <pointcloud_processing_msgs/ObjectInfoArray.h>
-#include <pointcloud_processing_msgs/fov_positions.h>
-#include <tf/transform_broadcaster.h>
-#include <tf/transform_listener.h>
-#include <tf2_geometry_msgs/tf2_geometry_msgs.h>
 #include <tf2_ros/transform_listener.h>
-#include <visualization_msgs/Marker.h>
+#include <tf2_sensor_msgs/tf2_sensor_msgs.h>
 #include <sensor_msgs/CameraInfo.h>
 #include <vision_msgs/Detection2DArray.h>
-
-#include <math.h> 
-
-// Approximate time policy
-#include <message_filters/subscriber.h>
-#include <message_filters/synchronizer.h>
-#include <message_filters/sync_policies/approximate_time.h>
-using namespace message_filters;
 
 // Darknet detection
 #include <darknet_ros_msgs/BoundingBoxes.h>
 
 // PCL specific includes
-#include <sensor_msgs/PointCloud2.h>
 #include <pcl_conversions/pcl_conversions.h>
 #include <pcl/point_cloud.h>
 #include <pcl/point_types.h>
-#include <pcl/filters/voxel_grid.h>
 #include <pcl/filters/extract_indices.h>
 #include <pcl/filters/passthrough.h>
-#include <pcl/filters/statistical_outlier_removal.h>
 #include <pcl/ModelCoefficients.h>
 #include <pcl/sample_consensus/model_types.h>
 #include <pcl/sample_consensus/method_types.h>
 #include <pcl/segmentation/sac_segmentation.h>
 #include <pcl/common/centroid.h>
+
+// macros
+#define UNKNOWN_OBJECT_ID -1
 
 // typedefs
 typedef pcl::PointXYZRGB PointType;
@@ -52,17 +31,10 @@ typedef int ObjectClassID;
 typedef std::string ObjectClassName;
 typedef std::map<ObjectClassName, ObjectClassID> ObjectsMap;
 
-const int QUEUE_SIZE = 10;
-std::string DARKNET_TOPIC;
-std::string RETINANET_TOPIC;
-std::string PCL_TOPIC;
-std::string FOV_TOPIC;
-std::string TARGET_FRAME;
-std::string TARGET_CLASS;
-bool VISUAL;
-bool PCL_VISUAL;
 bool debug_lidar_viz;
 
+// the optical frame of the RGB camera (not the link frame)
+std::string rgb_optical_frame_;
 
 // ROS Nodehandle
 ros::NodeHandle *nh;
@@ -73,21 +45,15 @@ ros::Publisher lidar_fov_pub_;
 ros::Publisher lidar_bbox_pub_;
 
 // Initialize transform listener
-tf::TransformListener* lst;
-tf2_ros::Buffer* pbuffer;
+std::shared_ptr<tf2_ros::TransformListener> tf_listener_;
+tf2_ros::Buffer tf_buffer_;
 
 // caches for callback data
 darknet_ros_msgs::BoundingBoxes current_boxes_;
-pointcloud_processing_msgs::fov_positions current_fov;
 sensor_msgs::CameraInfo camera_info_;
 
 //map
 ObjectsMap object_classes;
-
-bool received_first_message=false;
-bool received_first_message_bbox =false;
-bool received_first_message_cloud =false;
-bool received_fov_region=false;
 
 typedef struct
 {
@@ -96,27 +62,38 @@ typedef struct
     double z;
 } PixelCoords;
 
-void bBoxCb(const darknet_ros_msgs::BoundingBoxesConstPtr& input_detection)
-{
-    current_boxes_ = *input_detection;
 
-    received_first_message_bbox =true;
+/**
+ * @brief Callback function for bounding boxes detected by Darknet
+ * @param msg Bounding boxes
+ * @post The message is copied to a local cache
+ */
+void bBoxCb(const darknet_ros_msgs::BoundingBoxesConstPtr& msg)
+{
+    current_boxes_ = *msg;
 }
 
 
-void foVRegionCb(const pointcloud_processing_msgs::fov_positionsConstPtr& fov_region_)
-{
-    current_fov=*fov_region_;
-    received_fov_region=true;
-}
 
-
+/**
+ * @brief Callback function for the RGB camera info
+ * @details Specifically, this node needs the width, height,
+ *          and intrinsic matrix of the camera.
+ * @param msg Camera info
+ * @post The message is copied to a local cache
+ */
 void cameraInfoCb(const sensor_msgs::CameraInfoConstPtr msg)
 {
     camera_info_ = *msg;
 }
 
 
+/**
+ * @brief Normalize a point
+ * @details The normalized results has a magnitude of 1.
+ * @param input Point to be normalzied
+ * @return The normalized point
+ */
 inline PointType normalizePoint(PointType input)
 {    
     const double denominator = std::sqrt(input.x * input.x +
@@ -132,12 +109,13 @@ inline PointType normalizePoint(PointType input)
 
 
 /**
- * @brief Convert a point in the camera frame to (u,v) pixel coordinates
- * 
+ * @brief Convert a cartesian point in the camera optical frame to (x,y) pixel coordinates.
+ * @details Note: Make sure the point is in the optical camera frame, and not the link frame.
+ *          We also provide the depth value of the pixel.
  * @param point The cartesian point to convert
- * @param camera_info A 3x3 matrix intrinsic to the camera.
- * 
- * @return A pair containing the (x,y) pixel coordinates.
+ * @param camera_info The camera information. Specifically we use the
+ *                    intrinsic matrix.
+ * @return The (x,y) pixel coordinates, plus depth values.
  */
 inline PixelCoords poseToPixel(const PointType &point,
                                const sensor_msgs::CameraInfo &camera_info)
@@ -154,6 +132,14 @@ inline PixelCoords poseToPixel(const PointType &point,
 }
 
 
+/**
+ * @brief Convert a pointcloud into (x,y,depth) pixel coordinate space.
+ * @details Note: Make sure the cloud is in the optical camera frame, and not the link frame.
+ * @param cloud The cartesian pointcloud to convert
+ * @param camera_info The camera information. Specifically we use the
+ *                    intrinsic matrix.
+ * @return A vector of (x,y,depth) pixel coordinates. Index order is preserved.
+ */
 std::vector<PixelCoords> convertCloudToPixelCoords(const CloudPtr cloud,
                                                    const sensor_msgs::CameraInfo &camera_info)
 {
@@ -169,6 +155,12 @@ std::vector<PixelCoords> convertCloudToPixelCoords(const CloudPtr cloud,
 }
 
 
+/**
+ * @brief Check a map of known object classes to retreive the class ID for an object class name.
+ * @param class_name A known object class name
+ * @param map The map of object class names to class IDs
+ * @return The class ID. -1 indicates that class_name was not a key in the map.
+ */
 ObjectClassID getObjectID(const ObjectClassName class_name, const ObjectsMap &map)
 {
     ObjectClassID class_id;
@@ -181,11 +173,12 @@ ObjectClassID getObjectID(const ObjectClassName class_name, const ObjectsMap &ma
     {
         ROS_ERROR("getObjectID() - No class ID found for name %s", class_name.c_str());
         std::cerr << e.what() << '\n';
-        return ObjectClassID(NAN);
+        return ObjectClassID(UNKNOWN_OBJECT_ID);
     }
 
     return class_id;
 }
+
 
 
 ObjectsMap convertClassesMap(std::map<std::string, std::string> input)
@@ -201,6 +194,15 @@ ObjectsMap convertClassesMap(std::map<std::string, std::string> input)
 }
 
 
+/**
+ * @brief Extract from a pointcloud those points that are within the FoV of the camera.
+ * @param input The input pointcloud
+ * @param pixel_coordinates A vector of pixelspace coordinates. These correspond by index
+ *                          with the points ins input
+ * @param height The pixel height of the camera
+ * @param width The pixel width of the camera
+ * @return A pointcloud containing only the points within the camera FoV.
+ */
 CloudPtr filterPointsInFoV(const CloudPtr input,
                            const std::vector<PixelCoords> &pixel_coordinates,
                            const int height,
@@ -240,6 +242,18 @@ CloudPtr filterPointsInFoV(const CloudPtr input,
 }
 
 
+
+/**
+ * @brief Extract from a pointcloud those points that are within a rectangular bounding box.
+ * @param input The input pointcloud
+ * @param pixel_coordinates A vector of pixelspace coordinates. These correspond by index
+ *                          with the points ins input
+ * @param xmin The x-pixel lower bound of the rectangle
+ * @param xmax The x-pixel upper bound of the rectangle
+ * @param ymin The y-pixel lower bound of the rectangle
+ * @param ymax The y-pixel upper bound of the rectangle
+ * @return A pointcloud containing only the points within the bounding box.
+ */
 CloudPtr filterPointsInBox(const CloudPtr input,
                            const std::vector<PixelCoords> &pixel_coordinates,
                            const int xmin,
@@ -282,15 +296,38 @@ CloudPtr filterPointsInBox(const CloudPtr input,
 }
 
 
-void pointCloudCb(const sensor_msgs::PointCloud2ConstPtr& input_cloud)
+bool transformPointCloud2(sensor_msgs::PointCloud2 &pointcloud,
+                          const std::string target_frame)
 {
-    received_first_message_cloud = true;
+    geometry_msgs::TransformStamped transform;
+    try{
+      transform = tf_buffer_.lookupTransform(target_frame, tf2::getFrameId(pointcloud), ros::Time(0), ros::Duration(0.1));
+    }
+    catch (tf2::TransformException &ex) {
+      ROS_WARN("%s",ex.what());
+      return false;
+    }
 
-    if (!received_fov_region)
+    tf2::doTransform(pointcloud, pointcloud, transform);
+    
+    return true;
+}
+
+
+/**
+ * @brief Callback function for the pointclouds
+ * @details This does the core processing to locate objects in the cloud
+ * @param input_cloud The pointcloud
+ */
+void pointCloudCb(sensor_msgs::PointCloud2 input_cloud)
+{
+    // check that we've received bounding boxes
+    if (current_boxes_.bounding_boxes.empty())
     {
         return;
     }
 
+    // check that we've received camera info
     if (camera_info_.height == 0 || camera_info_.width == 0)
     {
         return;
@@ -301,61 +338,21 @@ void pointCloudCb(const sensor_msgs::PointCloud2ConstPtr& input_cloud)
     double confidence_threshold;
     nh->param("confidence_threshold", confidence_threshold, 0.75);
 
-    //ROS_INFO("cloud callback");
-    tf2_ros::Buffer tf_buffer;
-    tf2_ros::TransformListener tf2_listener(tf_buffer);
-    received_first_message = true;
-
-    // Initialize containers for clouds
-    CloudPtr cloud(new Cloud);
-    CloudPtr cloud_target(new Cloud);
-
-    // Initialize container for object poses
-    geometry_msgs::PoseArray target_poses;
-    target_poses.header.stamp = now;
-    target_poses.header.frame_id = input_cloud->header.frame_id;
-
-    // Initialize container for centroids' markers
-    visualization_msgs::Marker centroid_target_list;
-
-    centroid_target_list.header.frame_id = input_cloud->header.frame_id;
-    centroid_target_list.type = visualization_msgs::Marker::SPHERE_LIST;
-    centroid_target_list.color.a = 1.0;
-    centroid_target_list.color.r = 1.0;
-    centroid_target_list.action = visualization_msgs::Marker::ADD;
-
-    centroid_target_list.scale.x = 0.05;
-    centroid_target_list.scale.y = 0.05;
-    centroid_target_list.scale.z = 0.05;
+    // transform the pointcloud into the RGB optical frame
+    if (tf2::getFrameId(input_cloud) != rgb_optical_frame_)
+    {
+        if (!transformPointCloud2(input_cloud, rgb_optical_frame_))
+        {
+            return;
+        }  
+    }
 
     // Convert sensor_msgs::PointCloud2 to pcl::PointCloud
-    pcl::fromROSMsg(*input_cloud, *cloud);
+    CloudPtr cloud(new Cloud);
+    pcl::fromROSMsg(input_cloud, *cloud);
 
     // Initialize container for inliers of the ROI
     pcl::PointIndices::Ptr inliers_camera_fov(new pcl::PointIndices());
-
-    //check pcl and rgb frames are using same frame_id 
-    if (input_cloud->header.frame_id != current_fov.header.frame_id)
-    {
-        ROS_INFO("frame is not same! cloud : %s , fov_region: %s", input_cloud->header.frame_id.c_str(), current_fov.header.frame_id.c_str());
-        return;
-    }
-
-    // ----------------------Voxel Downsampling----------------------------------
-    // CloudPtr cloud_downsampled(new Cloud);
-    // pcl::VoxelGrid<PointType> sor_voxelgrid;
-    // sor_voxelgrid.setInputCloud(cloud);
-    // sor_voxelgrid.setLeafSize(0.02, 0.02, 0.02); //size of the grid
-    // sor_voxelgrid.filter(*cloud_downsampled);
-
-    // // ---------------------StatisticalOutlierRemoval--------------------
-    // // Remove statistical outliers from the downsampled cloud
-    // CloudPtr cloud_denoised(new Cloud);
-    // pcl::StatisticalOutlierRemoval<PointType> sor_noise;
-    // sor_noise.setInputCloud(cloud_downsampled);
-    // sor_noise.setMeanK(50);
-    // sor_noise.setStddevMulThresh(1.0);
-    // sor_noise.filter(*cloud_denoised);
 
     // remove NaN points from the cloud
     CloudPtr cloud_nan_filtered(new Cloud);
@@ -378,7 +375,7 @@ void pointCloudCb(const sensor_msgs::PointCloud2ConstPtr& input_cloud)
     // output
     vision_msgs::Detection2DArray detected_objects;
     detected_objects.header.stamp = now;
-    detected_objects.header.frame_id = input_cloud->header.frame_id;
+    detected_objects.header.frame_id = input_cloud.header.frame_id;
     detected_objects.detections.reserve(current_boxes_.bounding_boxes.size());
 
     // produce pixel-space coordinates
@@ -387,8 +384,10 @@ void pointCloudCb(const sensor_msgs::PointCloud2ConstPtr& input_cloud)
     /////////////////////////////////////////////////////////////
     for(const darknet_ros_msgs::BoundingBox &box : current_boxes_.bounding_boxes)
     {
+        const ObjectClassID id = getObjectID(box.Class, object_classes);
+
         // do we meet the threshold for a confirmed detection?
-        if (box.probability >= confidence_threshold)
+        if (box.probability >= confidence_threshold && id != UNKNOWN_OBJECT_ID)
         {            
             // ----------------------Extract points in the bounding box-----------
             const CloudPtr cloud_in_bbox = filterPointsInBox(cloud_fov,
@@ -410,7 +409,7 @@ void pointCloudCb(const sensor_msgs::PointCloud2ConstPtr& input_cloud)
             object.bbox.size_y = box.ymax - box.ymin;
 
             vision_msgs::ObjectHypothesisWithPose hypothesis;
-            hypothesis.id = getObjectID(box.Class, object_classes);
+            hypothesis.id = id;
             hypothesis.score = box.probability;
             hypothesis.pose.pose.position.x = centroid_out[0];
             hypothesis.pose.pose.position.y = centroid_out[1];
@@ -433,20 +432,18 @@ int
 main (int argc, char** argv)
 {
     // Initialize ROS
-    ros::init (argc, argv, "pointcloud_processing");
-    nh = new ros::NodeHandle();
+    ros::init(argc, argv, "rgb_plus_lidar_processing");
+    nh = new ros::NodeHandle("~");
 
-    nh->param("DARKNET_TOPIC", DARKNET_TOPIC, {"/darknet_ros/bounding_boxes"});
-    nh->param("RETINANET_TOPIC", RETINANET_TOPIC, {"/retina_ros/bounding_boxes"});
-    nh->param("PCL_TOPIC", PCL_TOPIC, {"/pointcloud_transformer/output_pcl2"});
-    nh->param("FOV_TOPIC", FOV_TOPIC, {"/fov_regions"});
-    //nh->param("PCL_TOPIC", PCL_TOPIC, {"/points2"});
-    nh->param("TARGET_FRAME", TARGET_FRAME, {"odom"});
-    nh->param("TARGET_CLASS", TARGET_CLASS, {"chair"});
-    nh->param("VISUAL", VISUAL, {true});
-    nh->param("PCL_VISUAL", PCL_VISUAL, {true});
+    if (argc != 2)
+    {
+        ROS_INFO("usage: rosrun pointcloud_processing rgb_plus_lidar_processing rgb_frame");
+        return 1;
+    }
+
+    rgb_optical_frame_ = std::string(argv[1]);
+
     nh->param("debug_lidar_viz", debug_lidar_viz, {true});
-
 
     std::map<std::string, std::string> temp_map;
     if (!nh->hasParam("/sep_processing_node/object_classes"))
@@ -466,10 +463,11 @@ main (int argc, char** argv)
         return 1;
     }
 
+    tf_listener_ = std::make_shared<tf2_ros::TransformListener>(tf_buffer_);
+
     // Initialize subscribers to darknet detection and pointcloud
-    ros::Subscriber bbox_sub = nh->subscribe<darknet_ros_msgs::BoundingBoxes>(DARKNET_TOPIC, 100, bBoxCb); 
-    ros::Subscriber cloud_sub = nh->subscribe<sensor_msgs::PointCloud2>(PCL_TOPIC, 100, pointCloudCb);
-    ros::Subscriber fovregion_sub = nh->subscribe<pointcloud_processing_msgs::fov_positions>(FOV_TOPIC, 100, foVRegionCb);
+    ros::Subscriber bbox_sub = nh->subscribe<darknet_ros_msgs::BoundingBoxes>("bounding_boxes", 10, bBoxCb); 
+    ros::Subscriber cloud_sub = nh->subscribe<sensor_msgs::PointCloud2>("pointcloud", 10, pointCloudCb);
     ros::Subscriber camera_info_sub = nh->subscribe<sensor_msgs::CameraInfo>("camera_info", 100, cameraInfoCb);
 
     // Initialize transform listener
@@ -488,15 +486,8 @@ main (int argc, char** argv)
         lidar_fov_pub_ = nh->advertise<sensor_msgs::PointCloud2>("lidar_fov", 1);
         lidar_bbox_pub_ = nh->advertise<sensor_msgs::PointCloud2>("lidar_bbox", 1);
     }
-
-    ROS_INFO("Started. Waiting for inputs.");
-    while (ros::ok() && (!received_first_message_bbox && !received_first_message_cloud)) {
-        ROS_WARN_THROTTLE(2, "Waiting for image, depth and detections messages...");
-        ros::spinOnce();
-    }
         
-    // Spin
-    ros::spin ();
+    ros::spin();
 
     return 0;
 }
