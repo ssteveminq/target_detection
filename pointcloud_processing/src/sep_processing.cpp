@@ -89,26 +89,6 @@ void cameraInfoCb(const sensor_msgs::CameraInfoConstPtr msg)
 
 
 /**
- * @brief Normalize a point
- * @details The normalized results has a magnitude of 1.
- * @param input Point to be normalzied
- * @return The normalized point
- */
-inline PointType normalizePoint(PointType input)
-{    
-    const double denominator = std::sqrt(input.x * input.x +
-                                         input.y * input.y +
-                                         input.z * input.z);
-
-    input.x /= denominator;
-    input.y /= denominator;
-    input.z /= denominator;
-
-    return input;
-}
-
-
-/**
  * @brief Convert a cartesian point in the camera optical frame to (x,y) pixel coordinates.
  * @details Note: Make sure the point is in the optical camera frame, and not the link frame.
  *          We also provide the depth value of the pixel.
@@ -122,11 +102,9 @@ inline PixelCoords poseToPixel(const PointType &point,
 {
     PixelCoords result;
 
-    // const PointType norm_point = normalizePoint(point);
-
     result.x = camera_info.K[0]*point.x / point.z + camera_info.K[2];
     result.y = camera_info.K[4]*point.y / point.z + camera_info.K[5];
-    result.z = point.z;// norm_point.z;
+    result.z = point.z;
 
     return result;
 }
