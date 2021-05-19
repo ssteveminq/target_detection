@@ -122,11 +122,11 @@ inline PixelCoords poseToPixel(const PointType &point,
 {
     PixelCoords result;
 
-    const PointType norm_point = normalizePoint(point);
+    // const PointType norm_point = normalizePoint(point);
 
-    result.x = camera_info.K[0]*norm_point.x + camera_info.K[2]*norm_point.z;
-    result.y = camera_info.K[4]*norm_point.y + camera_info.K[5]*norm_point.z;
-    result.z = norm_point.z;
+    result.x = camera_info.K[0]*point.x / point.z + camera_info.K[2];
+    result.y = camera_info.K[4]*point.y / point.z + camera_info.K[5];
+    result.z = point.z;// norm_point.z;
 
     return result;
 }
