@@ -19,6 +19,10 @@ find_package(catkin REQUIRED COMPONENTS
   geometry_msgs
   pointcloud_processing_msgs
   tf
+  tf2
+  tf2_ros
+  tf2_msgs
+  tf2_sensor_msgs
   tf2_geometry_msgs
   sensor_msgs
   vision_msgs
@@ -47,6 +51,8 @@ catkin_package(
   geometry_msgs
   pointcloud_processing_msgs
   tf
+  tf2
+  tf2_ros
   tf2_geometry_msgs
   sensor_msgs
   vision_msgs
@@ -66,10 +72,14 @@ include_directories(
 
 add_executable(pcl_processing src/pcl_processing.cpp)
 add_executable(sep_processing src/sep_processing.cpp)
+add_executable(pose_estimation_service src/multiview_estimation.cpp)
+#add_executable(bboxfilter_processing src/bbox_filter_processing.cpp)
 #add_executable(people_processing src/people_processing.cpp)
 
 target_link_libraries(pcl_processing ${catkin_LIBRARIES})
-target_link_libraries(sep_processing ${catkin_LIBRARIES})
+#target_link_libraries(sep_processing ${catkin_LIBRARIES})
+target_link_libraries(bboxfilter_processing ${catkin_LIBRARIES})
+target_link_libraries(pose_estimation_service ${catkin_LIBRARIES})
 #target_link_libraries(people_processing ${catkin_LIBRARIES})
 
 

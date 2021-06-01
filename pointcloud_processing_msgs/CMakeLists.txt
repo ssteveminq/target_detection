@@ -10,6 +10,7 @@ find_package(catkin REQUIRED
     geometry_msgs
     sensor_msgs
     std_msgs
+    std_srvs
     message_generation
 )
 
@@ -19,6 +20,7 @@ add_message_files(
     ObjectInfo.msg
     ObjectInfoArray.msg
     fov_positions.msg
+    ClusterArray.msg
 #    BoundingBoxes.msg
 )
 
@@ -27,12 +29,20 @@ add_message_files(
 #    CheckForObjects.action
 #)
 
+add_service_files(
+    FILES
+    register_scene.srv
+    get_targetpose.srv
+    )
+
 generate_messages(
   DEPENDENCIES
     actionlib_msgs
     geometry_msgs
     sensor_msgs
     std_msgs
+    std_srvs
+    geometry_msgs 
 )
 
 catkin_package(
@@ -42,4 +52,5 @@ catkin_package(
     sensor_msgs
     message_runtime
     std_msgs
+    geometry_msgs 
 )
