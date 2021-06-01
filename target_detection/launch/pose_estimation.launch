@@ -2,29 +2,22 @@
 <launch>
 
   <!-- ###########################  Pointcloud Processor ############################# -->
-    <arg name="darknet_topic" default="darknet_ros/boundingbox"/>
-    <arg name="retinanet_topic" default="retina_ros/boundingbox"/>
-    <arg name="pcl_topic" default="points2"/>
-    <arg name="fov_topic" default="fov_regions"/>
-    <arg name="target_frame" default="walrus/odom"/>
-    <arg name="target_class" default="chair"/>
-    <arg name="visual" default="true"/>
-    <arg name="pcl_visual" default="true"/>
-
-    <node pkg="pointcloud_processing" type="sep_processing" name="sep_processing_node" output="screen">
+    <node pkg="pointcloud_processing" type="rgb_plus_lidar_processing" name="sep_processing_node" output="screen" args="walrus/realsense_front_color_optical_frame">
       <rosparam command="load" file="$(find target_detection)/config/pose_estimation.yaml" />
-      <remap from="camera_info" to="/camera/color/camera_info"/>
+      <remap from="~camera_info" to="/camera/color/camera_info"/>
+      <remap from="~bounding_boxes" to="/darknet_ros/bounding_boxes"/>
+      <remap from="~pointcloud" to="/walrus/lidar_points"/>
     </node>
 
   <!-- ########################  Pointcloud transformer  ######################## -->
   <node pkg="nodelet" type="nodelet" name="test_nodelet"  args="manager" output="screen"/>
 
-  <node pkg="nodelet" type="nodelet" name="pointcloud_transformer" args="load transform_pointcloud/transformPointcloud test_nodelet" output="screen">
+  <!-- <node pkg="nodelet" type="nodelet" name="pointcloud_transformer" args="load transform_pointcloud/transformPointcloud test_nodelet" output="screen">
       <param name="to_frame" value="/walrus/realsense_front_color_optical_frame"/>
       <remap from="~input_pcl2" to="/walrus/lidar_points"/>
-  </node>
+  </node> -->
 
-  <node pkg="rviz_tools_py" type="fov_demo.py" name="fov_setter" />
+  <!-- <node pkg="rviz_tools_py" type="fov_demo.py" name="fov_setter" /> -->
 
   <!--<node pkg="nodelet" type="nodelet" name="pointcloud_transformer2" args="load transform_pointcloud/transformPointcloudTafr standalone_nodelet2" output="screen">-->
       <!--<param name="to_frame" value="laser"/>-->
