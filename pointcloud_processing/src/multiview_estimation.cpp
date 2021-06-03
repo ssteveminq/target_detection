@@ -538,8 +538,8 @@ void segmentationpointClouds()
           // Extracting Euclidean clusters using cloud and its normals
           std::vector<pcl::PointIndices> cluster_indices_;
           const float tolerance = 0.5f; // 50cm tolerance in (x, y, z) coordinate system
-          const double eps_angle = 30* (M_PI / 180.0); // 50degree tolerance in normals
-          const unsigned int min_cluster_size = 200;
+          const double eps_angle = 30* (M_PI / 180.0); // 50 degree tolerance in normals
+          const unsigned int min_cluster_size = 150;
          
           pcl::extractEuclideanClusters (*cloud_downsampled, *cloud_normals, tolerance, tree_ec, cluster_indices_, eps_angle, min_cluster_size);
           std::cout<<"segmentation size: "<<cluster_indices_.size()<<std::endl;
@@ -1158,9 +1158,9 @@ main (int argc, char** argv)
         inplane_pub= nh->advertise<sensor_msgs::PointCloud2> ("pcl_inplane", 1);
         outplane_pub= nh->advertise<sensor_msgs::PointCloud2> ("pcl_outplane", 1);
         clusters_pub= nh->advertise<pointcloud_processing_msgs::ClusterArray> ("segmented_pcl", 1);
-        //seg1_pub= nh->advertise<sensor_msgs::PointCloud2> ("pcl_seg1", 1);
-        //seg2_pub= nh->advertise<sensor_msgs::PointCloud2> ("pcl_seg2", 1);
-        //seg3_pub= nh->advertise<sensor_msgs::PointCloud2> ("pcl_seg3", 1);
+        seg1_pub= nh->advertise<sensor_msgs::PointCloud2> ("pcl_seg1", 1);
+        seg2_pub= nh->advertise<sensor_msgs::PointCloud2> ("pcl_seg2", 1);
+        seg3_pub= nh->advertise<sensor_msgs::PointCloud2> ("pcl_seg3", 1);
         segposes_pub= nh->advertise<geometry_msgs::PoseArray> ("seg_poses", 1);
         pcl_map_pub=  nh->advertise<sensor_msgs::PointCloud2> ("pcl_registered_map", 1);
         //pcl_registered_pub
@@ -1188,6 +1188,29 @@ main (int argc, char** argv)
        }
 
        segmentationpointClouds();
+
+       for(int cnt(0);cnt <Cloudbag.clusters.size(); cnt++)
+       {
+       
+           sensor_msgs::PointCloud2 output_tmp=Cloudbag.clusters[cnt];
+           if(cnt==0)
+            {
+                seg1_pub.publish(output_tmp);
+            }
+            else if(cnt==1)
+            {
+                seg2_pub.publish(output_tmp);
+            }
+            else if(cnt==2)
+            {
+                seg3_pub.publish(output_tmp);
+            }
+            else{
+                if(cnt>3)
+                    ROS_INFO("more than 3 clusters");
+            }
+       }
+
        //calculate_targetposes();
        //ROS_INFO("listener");
        //pcl_map_pub.publish(registered_pcl);
