@@ -12,14 +12,14 @@
 #include <geometry_msgs/Point.h>
 
 #include <sensor_msgs/Image.h>
-#include <tmc_yolo2_ros/Detections.h>
-#include <tmc_yolo2_ros/Detection.h>
+#include <darknet_ros_msgs/BoundingBoxes.h>
+#include <darknet_ros_msgs/BoundingBox.h>
 
 #include <knowledge_representation/LongTermMemoryConduit.h>
 #include <knowledge_representation/convenience.h>
-#include <knowledge_representation/Concept.h>
-#include <knowledge_representation/Entity.h>
-#include <knowledge_representation/Instance.h>
+#include <knowledge_representation/LTMCConcept.h>
+#include <knowledge_representation/LTMCEntity.h>
+#include <knowledge_representation/LTMCInstance.h>
 #include <villa_yolocloud/YoloCloud.h>
 #include <villa_yolocloud/DetectedObject.h>
 #include <villa_yolocloud/GetShelfObjects.h>
@@ -29,7 +29,7 @@
 
 typedef message_filters::sync_policies::ApproximateTime<sensor_msgs::Image,
                                                         sensor_msgs::Image,
-                                                        tmc_yolo2_ros::Detections> SyncPolicy;
+                                                        darknet_ros_msgs::BoundingBoxes> SyncPolicy;
 
 
 class YoloCloudNode {
@@ -45,23 +45,23 @@ private:
 public:
     bool received_first_message = false;
     YoloCloudNode(ros::NodeHandle node)
-        : ltmc(knowledge_rep::get_default_ltmc()) {
+        : ltmc(knowledge_rep::getDefaultLTMC()) {
         viz_pub = node.advertise<visualization_msgs::MarkerArray>("yoloobjects/markers", 1, true);
         // NOTE: We assume there's only one YoloCloud, so this will blow away anything that is sensed
-        ltmc.get_concept("sensed").remove_instances();
-        ltmc.get_concept("scanned").remove_references();
+        ltmc.getConcept("sensed").removeInstances();
+        ltmc.getConcept("scanned").removeReferences();
     }
 
     ~YoloCloudNode() {
-        ltmc.get_concept("sensed").remove_instances();
-        ltmc.get_concept("scanned").remove_references();
+        ltmc.getConcept("sensed").removeInstances();
+        ltmc.getConcept("scanned").removeReferences();
     }
 
     void data_callback(const sensor_msgs::Image::ConstPtr &rgb_image,
                        const sensor_msgs::Image::ConstPtr &depth_image,
-                       const tmc_yolo2_ros::Detections::ConstPtr &yolo_detections) {
+                       const darknet_ros_msgs::BoundingBoxes::ConstPtr &yolo_detections) {
         received_first_message = true;
-        if (yolo_detections->detections.empty()) {
+        if (yolo_detections->bounding_boxes.empty()) {
             return;
         }
 
@@ -88,13 +88,13 @@ public:
         cv::Mat depthI(depth_image->height, depth_image->width, CV_32FC1);
         memcpy(depthI.data, depth_image->data.data(), depth_image->data.size());
 
-        for (const tmc_yolo2_ros::Detection &detection : yolo_detections->detections) {
+        for (const darknet_ros_msgs::BoundingBox &detection : yolo_detections->bounding_boxes) {
             ImageBoundingBox bbox;
-            bbox.x = detection.x - detection.width/2;
-            bbox.y = detection.y - detection.height/2;
-            bbox.width = detection.width;
-            bbox.height = detection.height;
-            bbox.label = detection.class_name;
+            bbox.x = detection.xmin;
+            bbox.y = detection.ymin;
+            bbox.width = detection.xmax-detection.xmin;
+            bbox.height = detection.ymax-detection.ymin;
+            bbox.label = detection.Class;
 
             int idx = shelf_manager.addObject(bbox, cv_ptr->image, depthI, camToMap.cast<float>());
 
@@ -112,10 +112,10 @@ public:
 
     void add_to_ltmc(int cloud_idx) {
         std::string label = shelf_manager.labels.at(shelf_manager.objects->points[cloud_idx].label);
-        auto concept = ltmc.get_concept(label);
-        auto entity = concept.create_instance();
-        auto sensed = ltmc.get_concept("sensed");
-        entity.make_instance_of(sensed);
+        auto concept = ltmc.getConcept(label);
+        auto entity = concept.createInstance();
+        auto sensed = ltmc.getConcept("sensed");
+        entity.makeInstanceOf(sensed);
         entity_id_to_point.insert({entity.entity_id, cloud_idx});
     }
 
@@ -128,7 +128,7 @@ public:
             // Requested an ID that's not in the cloud. Return NANs
             if (entity_id_to_point.count(eid) == 0) {
                 knowledge_rep::Entity entity = {eid, ltmc};
-                entity.remove_attribute("sensed");
+                entity.removeAttribute("sensed");
                 p.x = NAN;
                 p.y = NAN;
                 p.z = NAN;
@@ -230,7 +230,7 @@ int main (int argc, char **argv) {
     //message_filters::Subscriber<sensor_msgs::Image> depth_sub(n, "/hsrb/head_rgbd_sensor/depth_registered/image", 10);
     message_filters::Subscriber<sensor_msgs::Image> image_sub(n, "/camera/rgb/image_rect_color", 10);
     message_filters::Subscriber<sensor_msgs::Image> depth_sub(n, "/camera/depth/image", 10);
-    message_filters::Subscriber<tmc_yolo2_ros::Detections> yolo_sub(n, "/yolo2_node/detections", 10);
+    message_filters::Subscriber<darknet_ros_msgs::BoundingBoxes> yolo_sub(n, "/yolo2_node/detections", 10);
     message_filters::Synchronizer<SyncPolicy> sync(SyncPolicy(10), image_sub, depth_sub, yolo_sub);
     sync.registerCallback(boost::bind(&YoloCloudNode::data_callback, &yc_node, _1, _2, _3));
 
