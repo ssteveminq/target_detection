@@ -9,6 +9,29 @@ It is assumed that we have pre-trained Object detection system such as YOLO or O
 
 ## Dependencies
 
+### Pointcloud Library (PCL) version 1.9
+***This is a specific requirement for ROS Noetic. It might work with PCL 1.10 using apt-get, but I know that 1.9 works if you build it from source.***
+To build PCL 1.9 from source:
+```
+cd ~/Downloads
+wget https://github.com/PointCloudLibrary/pcl/archive/pcl-1.9.1.tar.gz
+tar -zxvf pcl-1.8.1.tar.gz
+cd pcl-pcl-1.8.1
+mkdir build
+cd build
+cmake ..
+make
+sudo make install
+```
+### Perception PCL version 1.7
+Version 1.7 works with this setup, although other versions might also work. To install,
+```
+git clone https://github.com/ros-perception/perception_pcl.git # in the /src directory alongside target_detection
+cd perception_pcl
+git checkout 1.7.0
+```
+Then build the workspace as usual.
+
 ### Azure Kinect SDK
 If you want to use Azure Kinect as RGBD camera, you should install Kinect SDK.
 
