@@ -103,6 +103,7 @@ std::vector<geometry_msgs::PoseStamped> robot_poses;
 geometry_msgs::PoseStamped target_pose;
 geometry_msgs::PoseStamped previous_target_pose;
 std::vector<geometry_msgs::Point> bboxpoints;
+std::vector<std::vector<geometry_msgs::Point>> registered_bboxpoints;
 visualization_msgs::Marker registered_bbox_vertices;
 visualization_msgs::Marker registered_bbox_lines;
 //std::vector<int> seg_idxset;
@@ -146,6 +147,7 @@ ObjectsMap object_classes;
 
 CloudPtr cur_cloud;
 CloudPtr cur_cloud_fov;
+CloudPtr cur_cloud_bbox;
 CloudPtr cur_cloud_map;
 
 bool received_first_message=false;
@@ -177,7 +179,6 @@ void normalize_Point(gPoint& p1)
 
 double dotProduct_Point(const gPoint p1, const gPoint p2)
 {
-
     return (p1.x*p2.x+p1.y*p2.y+p1.z*p2.z);
 }
 
@@ -188,7 +189,7 @@ class Frustum
  ******/
 
 public:
-    std::vector<gPoint> pointset; //8points
+    //std::vector<gPoint> pointset; //8points
     std::vector<std::vector<double>> plane_coeffset; //8 coefficients (a,b,c,d)
 
 public:
@@ -198,16 +199,22 @@ public:
     make 6 planes with three points inside plane
     store coefficient of six planes
     */
-    Frustum(std::vector<gPoint> boxpoints){
+    Frustum(std::vector<gPoint> pointset){
 
-        pointset = boxpoints; //need deep copy?
-        plane_coeffset.resize(6);
-        plane_coeffset[0] = getPlanewithTreepoints(pointset[0], pointset[2], pointset[1]);
-        plane_coeffset[1] = getPlanewithTreepoints(pointset[6], pointset[4], pointset[7]);
-        plane_coeffset[2] = getPlanewithTreepoints(pointset[0], pointset[1], pointset[4]);
-        plane_coeffset[3] = getPlanewithTreepoints(pointset[6], pointset[7], pointset[2]);
-        plane_coeffset[4] = getPlanewithTreepoints(pointset[0], pointset[4], pointset[2]);
-        plane_coeffset[5] = getPlanewithTreepoints(pointset[3], pointset[5], pointset[1]);
+        if(pointset.size()!=8)
+        {
+            ROS_WARN("frustum requires more points!");
+        }
+        else{
+            plane_coeffset.resize(5);
+            /* the direction vector is towards inside of the volume of frustum */
+            plane_coeffset[0] = getPlanewithTreepoints(pointset[0], pointset[2], pointset[1]); //top plane
+            plane_coeffset[1] = getPlanewithTreepoints(pointset[6], pointset[4], pointset[7]); //bottom plane
+            plane_coeffset[2] = getPlanewithTreepoints(pointset[0], pointset[1], pointset[4]); //left plane
+            plane_coeffset[3] = getPlanewithTreepoints(pointset[6], pointset[7], pointset[2]); //right plane
+            plane_coeffset[4] = getPlanewithTreepoints(pointset[0], pointset[4], pointset[2]); //front plane
+            //plane_coeffset[5] = getPlanewithTreepoints(pointset[3], pointset[5], pointset[1]); //rear plane
+        }
     }
 
     std::vector<double> getPlanewithTreepoints(const gPoint p1, const gPoint p2, const gPoint p3)
@@ -235,6 +242,7 @@ public:
         return plane_coeff;
 
     }
+    /* check query point within the volume of frustum - using dot product with normal vectors of five planes */
     bool querypointInFrustum(const gPoint query)
     {
         //ROS_INFO_STREAM("queryfunction-plane_coeffsize : " <<plane_coeffset.size());
@@ -256,7 +264,6 @@ public:
 
     ~Frustum()
     {
-        pointset.clear();
         plane_coeffset.clear();
     }
 
@@ -672,35 +679,31 @@ bool register_scene(pointcloud_processing_msgs::register_scene::Request &req, po
     std::vector<geometry_msgs::Point> registered_bboxpoints_temp;
     tf2_ros::TransformListener tf2_listener(*pbuffer);
 
-    //current bounding box =>bboxpoints
-    //register bounding box points in world frame 
-    for(int i(0);i<bboxpoints.size();i++ )
-    {
-        ROS_INFO_STREAM("bboxpoint size: "<<bboxpoints.size());
-        //transform to the map frame
-        try{
-            point_in.point = bboxpoints[i];
-            point_in.header.frame_id = "walrus/realsense_front_color_optical_frame";
-            point_in.header.stamp = ros::Time(0);
-            point_out = pbuffer->transform(point_in, "walrus/map");
-            //tf2::doTransform(bboxpoints[i], point_out, transform_pcl);
-            registered_bboxpoints_temp.push_back(point_out.point);
-            //registered_bboxpoints.push_back(point_out.point);
-            //ROS_INFO_STREAM("point_out. x: "<<point_out.point.x <<"point_out.y : " <<point_out.point.y<<std::endl;);
-            registered_bbox_vertices.points.push_back(point_out.point); //save box vertices for visualization
+    //current bounding box =>bboxpoints == registered_bboxpoints_temp
+     for(int i(0);i<bboxpoints.size();i++ )
+        {
+            ROS_INFO_STREAM("bboxpoint size: "<<bboxpoints.size());
+            //transform to the map frame
+            try{
+                point_in.point = bboxpoints[i];
+                point_in.header.frame_id = "walrus/realsense_front_color_optical_frame";
+                point_in.header.stamp = ros::Time(0);
+                point_out = pbuffer->transform(point_in, "walrus/map");
+                registered_bboxpoints_temp.push_back(point_out.point);
+                registered_bbox_vertices.points.push_back(point_out.point); //save box vertices for visualization
+                //registered_bboxpoints.push_back(point_out.point);
+                //ROS_INFO_STREAM("point_out. x: "<<point_out.point.x <<"point_out.y : " <<point_out.point.y<<std::endl;);
+            }
+
+            catch (tf2::TransformException ex){
+                ROS_ERROR("%s",ex.what());
+            }
         }
 
-        catch (tf2::TransformException ex){
-            ROS_ERROR("%s",ex.what());
-        }
-    }
-
-    addbboxlines(registered_bbox_lines, registered_bboxpoints_temp);
-
-    //filter the current registered pc using new bounding box w.r.t map frame 
+    CloudPtr cloud_(new Cloud);
     if(!first_registered )
     {
-        CloudPtr cloud_(new Cloud);
+        //filter the current registered pc using new bounding box w.r.t map frame 
         pcl::fromROSMsg(registered_pcl_filtered, *cloud_);
         const CloudPtr cloud_in_bbox_filtered =filterPointsInFrustum(cloud_, registered_bboxpoints_temp); //map_frame
         pcl::toROSMsg(*cloud_in_bbox_filtered , registered_pcl_filtered); //save filted pcl to "registered_pcl_filtered"
@@ -711,13 +714,14 @@ bool register_scene(pointcloud_processing_msgs::register_scene::Request &req, po
        //register current fov pointcloud
        if(bool_cloud_fov)
        {
-           pcl::toROSMsg(*cur_cloud_fov, cloud_in);
+           pcl::toROSMsg(*cur_cloud_bbox, cloud_in);
            CloudFOVbag.clusters.push_back(cloud_in);
        }
 
+       //tranfrom current pcl to map frame
        transform_pcl = pbuffer->lookupTransform("walrus/map", "walrus/realsense_front_color_optical_frame", ros::Time(0), ros::Duration(2.0));
        pcl::PCLPointCloud2 pcl_pc2;
-       pcl::toROSMsg(*cur_cloud_fov, cloud_in);
+       pcl::toROSMsg(*cur_cloud_bbox, cloud_in);
        tf2::doTransform(cloud_in, cloud_out, transform_pcl);
        Cloudbag.clusters.push_back(cloud_out);
        //save point cloud w.r.t map frame
@@ -726,8 +730,38 @@ bool register_scene(pointcloud_processing_msgs::register_scene::Request &req, po
            registered_pcl_filtered= cloud_out;
            first_registered=false;
        }
-       robot_poses.push_back(robot_pose);
+       else //filter incoming pointcloud with registered_boxes
+       {
+           //convert current registered_pcl_map(sensor_msgs::PoinCloud2) to pcl pointcloud and pclPointcloud2
+           pcl::PCLPointCloud2 pcl2_registered;
+           CloudPtr cloud_registered(new Cloud);
+           pcl::fromROSMsg(registered_pcl_filtered, *cloud_registered);
+           pcl::toPCLPointCloud2( *cloud_registered,pcl2_registered);
 
+           //convert current pocintlcoud_fov(map frame) to  pcl pointcloud : cloud_fov_map
+           CloudPtr cloud_fov_map_(new Cloud);
+           pcl::fromROSMsg(cloud_out, *cloud_fov_map_);
+           pcl::PCLPointCloud2 pcl2_fov;
+           for(size_t j(0); j<registered_bboxpoints.size();j++ )
+           {
+               ROS_INFO_STREAM("j: "<<j);
+               cloud_fov_map_=filterPointsInFrustum(cloud_fov_map_, registered_bboxpoints[j]); //map_frame
+               //ROS_INFO_STREAM("size of pointcloud after filterwithFrustum: " <<cur_cloud_bbox->points.size());
+               pcl::toPCLPointCloud2( *cloud_fov_map_,pcl2_fov);
+               pcl::concatenatePointCloud(pcl2_registered, pcl2_fov,pcl2_registered); //this function requires PCLPointcloud2 format
+           }
+           pcl::fromPCLPointCloud2(pcl2_registered,*cloud_fov_map_); //convert
+           pcl::toROSMsg(*cloud_fov_map_, registered_pcl_filtered); //save filted pcl to "registered_pcl_filtered"
+           //ROS_INFO_STREAM("concatenate done");
+       }
+
+       robot_poses.push_back(robot_pose);
+         //register bounding box points in world frame 
+       registered_bboxpoints.push_back(registered_bboxpoints_temp);
+        addbboxlines(registered_bbox_lines, registered_bboxpoints_temp);
+
+
+           
        res.is_registered=true;
        ROS_INFO("service done");
        return true;
@@ -1319,7 +1353,7 @@ void pointCloudCb(const sensor_msgs::PointCloud2ConstPtr& input_cloud)
             double min_depth=0.0;
             if(box.Class=="person")
             {
-                const CloudPtr cloud_in_bbox = filterPointsInBox(cur_cloud_fov,
+                cur_cloud_bbox = filterPointsInBox(cur_cloud_fov,
                                                              pixel_coordinates_fov,
                                                              box.xmin,
                                                              box.xmax,
@@ -1340,7 +1374,7 @@ void pointCloudCb(const sensor_msgs::PointCloud2ConstPtr& input_cloud)
                 if (debug_lidar_viz)
                 {
                     sensor_msgs::PointCloud2 pc2;
-                    pcl::toROSMsg(*cloud_in_bbox, pc2);
+                    pcl::toROSMsg(*cur_cloud_bbox, pc2);
                     lidar_bbox_pub_.publish(pc2);
                     //bbox_marker_pub.publish(bbox_vertices);
                     //bboxline_marker_pub.publish(bbox_lines);
@@ -1614,7 +1648,7 @@ main (int argc, char** argv)
     nh->param("RETINANET_TOPIC", RETINANET_TOPIC, {"/retina_ros/bounding_boxes"});
     //nh->param("PCL_TOPIC", PCL_TOPIC, {"/pointcloud_transformer/output_pcl2"});
     //nh->param("PCL_TOPIC", PCL_TOPIC, {"/sep_processing_node/lidar_bbox"});
-    nh->param("PCL_TOPIC", PCL_TOPIC, {"/sep_processing_node/lidar_bbox"});
+    nh->param("PCL_TOPIC", PCL_TOPIC, {"/sep_processing_node/lidar_fov"});
     nh->param("FOV_TOPIC", FOV_TOPIC, {"/fov_regions"});
     //nh->param("PCL_TOPIC", PCL_TOPIC, {"/points2"});
     nh->param("TARGET_FRAME", TARGET_FRAME, {"odom"});
